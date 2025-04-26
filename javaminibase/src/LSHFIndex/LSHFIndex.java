@@ -57,7 +57,9 @@ public class LSHFIndex implements Serializable {
             pq.addAll(layer.nearestNeighborSearch(vector, k)); // Ensure PrefixTree returns RIDDistancePair
         }
         List<RIDDistancePair> results = new ArrayList<>();
-        while (!pq.isEmpty() && results.size() < k) {
+        
+        // Fixed condition to handle k=0 case (return all tuples)
+        while (!pq.isEmpty() && (k == 0 || results.size() < k)) {
             results.add(pq.poll());
         }
         return results;

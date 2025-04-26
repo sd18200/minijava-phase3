@@ -134,8 +134,8 @@ public class PrefixTree implements Serializable {
                     double actualDistance = vector.distanceTo(target);
                     
                     for (RID rid : vectorEntry.getValue()) {
-                        if (pq.size() < k) {
-                            // Add to results if we don't have k elements yet
+                        if (k == 0 || pq.size() < k) {
+                            // Add ALL entries if k=0 or add until we have k entries
                             pq.add(new RIDDistancePair(rid, actualDistance));
                         } else if (actualDistance < -pq.peek().distance) {
                             // Replace max element if we found a closer one

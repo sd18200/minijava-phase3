@@ -175,6 +175,11 @@ public class PredEval
 					case AttrOperator.aopNE:
 						op_res = (distance != temp_ptr.distance);
 						break;
+					case AttrOperator.aopVECTORDIST:
+						// For vector distance join: check if distance <= threshold
+						op_res = (distance <= temp_ptr.distance);
+						break;
+
 					default:
 						break;
 				}
