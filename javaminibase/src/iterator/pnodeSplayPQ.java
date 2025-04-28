@@ -10,8 +10,12 @@ import java.io.*;
 public class pnodeSplayPQ extends pnodePQ
 {
 
+ 
+
+
   /** the root of the tree */
   protected pnodeSplayNode   root;
+  private Vector100Dtype Target = null;
   /*
   pnodeSplayNode*   leftmost();
   pnodeSplayNode*   rightmost();
@@ -31,6 +35,7 @@ public class pnodeSplayPQ extends pnodePQ
     fld_no = 0;
     fld_type = new AttrType(AttrType.attrInteger);
     sort_order = new TupleOrder(TupleOrder.Ascending);
+    Target = null;
   }
 
   /**
@@ -46,6 +51,17 @@ public class pnodeSplayPQ extends pnodePQ
     fld_no   = fldNo;
     fld_type = fldType;
     sort_order = order;
+    Target = null;
+  }
+
+  public pnodeSplayPQ(int fldNo, AttrType fldType, TupleOrder order, Vector100Dtype target)
+  {
+    root = null;
+    count = 0;
+    fld_no   = fldNo;
+    fld_type = fldType;
+    sort_order = order;
+    this.Target = target; // Store the target
   }
 
   /**
@@ -151,41 +167,71 @@ public class pnodeSplayPQ extends pnodePQ
    * Removes the minimum (Ascending) or maximum (Descending) element.
    * @return the element removed
    */
-  public pnode deq() 
+  public pnode deq()
   {
     if (root == null) return null;
-    
+
     count --;
     pnodeSplayNode t = root;
-    pnodeSplayNode l = root.lt;
-    if (l == null) {
-      if ((root = t.rt) != null) root.par = null;
-      return t.item;
+
+    // *** MODIFY deq to handle both Ascending (min) and Descending (max) ***
+    boolean findMin = (sort_order.tupleOrder == TupleOrder.Ascending);
+
+    if (findMin) {
+        // Original logic finds the minimum (leftmost)
+        pnodeSplayNode l = root.lt;
+        if (l == null) {
+          if ((root = t.rt) != null) root.par = null;
+          return t.item;
+        } else {
+          while (true) { // Find leftmost node
+            pnodeSplayNode ll = l.lt;
+            if (ll == null) { // l is the leftmost
+              if ((t.lt = l.rt) != null) t.lt.par = t; // Bypass l
+              return l.item;
+            } else {
+              pnodeSplayNode lll = ll.lt;
+              if (lll == null) { // ll is the leftmost
+                if((l.lt = ll.rt) != null) l.lt.par = l; // Bypass ll
+                return ll.item;
+              } else { // Splay operation to bring leftmost closer
+                t.lt = ll; ll.par = t;
+                if ((l.lt = ll.rt) != null) l.lt.par = l;
+                ll.rt = l; l.par = ll;
+                t = ll;
+                l = lll;
+              }
+            }
+          } // end of while(true)
+        }
+    } else { // findMax (rightmost)
+        pnodeSplayNode r = root.rt;
+        if (r == null) { // root is the rightmost
+            if ((root = t.lt) != null) root.par = null;
+            return t.item;
+        } else {
+            while(true) { // Find rightmost node
+                pnodeSplayNode rr = r.rt;
+                if (rr == null) { // r is the rightmost
+                    if ((t.rt = r.lt) != null) t.rt.par = t; // Bypass r
+                    return r.item;
+                } else {
+                    pnodeSplayNode rrr = rr.rt;
+                    if (rrr == null) { // rr is the rightmost
+                        if ((r.rt = rr.lt) != null) r.rt.par = r; // Bypass rr
+                        return rr.item;
+                    } else { // Splay operation to bring rightmost closer
+                        t.rt = rr; rr.par = t;
+                        if ((r.rt = rr.lt) != null) r.rt.par = r;
+                        rr.lt = r; r.par = rr;
+                        t = rr;
+                        r = rrr;
+                    }
+                }
+            } // end while
+        }
     }
-    else {
-      while (true) {
-	pnodeSplayNode ll = l.lt;
-	if (ll == null) {
-	  if ((t.lt = l.rt) != null) t.lt.par = t;
-	  return l.item;
-	}
-	else {
-	  pnodeSplayNode lll = ll.lt;
-	  if (lll == null) {
-	    if((l.lt = ll.rt) != null) l.lt.par = l;
-	    return ll.item;
-	  }
-	  else {
-	    t.lt = ll; ll.par = t;
-	    if ((l.lt = ll.rt) != null) l.lt.par = l;
-	    ll.rt = l; l.par = ll;
-	    t = ll;
-	    l = lll;
-	  }
-	}
-      } // end of while(true)
-    } 
-  }
+  } 
   
   /*  
                   pnodeSplayPQ(pnodeSplayPQ& a);
@@ -211,4 +257,36 @@ public class pnodeSplayPQ extends pnodePQ
 
   int           OK();                    // rep invariant
   */
+
+
+  @Override
+  public int pnodeCMP(pnode a, pnode b) throws IOException, UnknowAttrType, TupleUtilsException {
+      try {
+          // Check if sorting by vector distance
+          if (fld_type.attrType == AttrType.attrVector100D && Target != null) {
+              // Ensure distances are calculated if not already present (e.g., during merge)
+              // Assuming distance is calculated and stored during generate_runs or needs recalculation here.
+              // If distance might be -1 or uninitialized, calculate it:
+              if (a.distance < 0) { // Check if distance needs calculation
+                  int[] vectorA = a.tuple.getVectorFld(fld_no);
+                  a.distance = TupleUtils.calculateEuclideanDistance(vectorA, Target.getValues());
+              }
+              if (b.distance < 0) { // Check if distance needs calculation
+                  int[] vectorB = b.tuple.getVectorFld(fld_no);
+                  b.distance = TupleUtils.calculateEuclideanDistance(vectorB, Target.getValues());
+              }
+
+              // Compare pre-calculated distances stored in pnodes
+              int comparison = Double.compare(a.distance, b.distance);
+              // NOTE: The existing enq/deq logic uses this comparison result directly
+              // and handles the sort_order (Ascending/Descending) itself.
+              return comparison;
+          } else {
+              // Original comparison logic using TupleUtils.CompareTupleWithTuple
+              return TupleUtils.CompareTupleWithTuple(fld_type, a.tuple, fld_no, b.tuple, fld_no);
+          }
+      } catch (Exception e) { // Catch broader exceptions like FieldNumberOutOfBoundException
+          throw new TupleUtilsException(e, "Error comparing pnodes.");
+      }
+  }
 }

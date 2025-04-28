@@ -4,9 +4,9 @@
 #the assignment to be generated
 
 JARFILES=bufmgr/*.class diskmgr/*.class global/*.class iterator/*.class\
-         heap/*.class chainexception/*.class  btree/*.class index/*.class tests/*.class
+         heap/*.class chainexception/*.class  btree/*.class index/*.class tests/*.class LSHFIndex/*.class
 
-JDKPATH = /usr/java/jdk1.3.1_02
+JDKPATH = /usr/lib/jvm/java-21-openjdk-amd64
 LIBPATH = .:..
 CLASSPATH = $(LIBPATH)
 BINPATH = $(JDKPATH)/bin
@@ -37,7 +37,7 @@ db:
 	make -C heap
 	make -C index
 	make -C iterator
-	
+	make -C LSHFIndex
 doc:
 	$(JAVADOC) $(DOCFILES)
 

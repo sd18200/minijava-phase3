@@ -18,6 +18,22 @@ import iterator.*;
  * as specified in Phase 3, Task 2 of the project.
  */
 public class DBInterface {
+
+
+    private static class OuterQueryResult {
+        iterator.Iterator iterator;
+        AttrType[] attrTypes;
+        short[] strSizes;
+        int numAttrs;
+
+        OuterQueryResult(iterator.Iterator iter, AttrType[] types, short[] sizes, int count) {
+            this.iterator = iter;
+            this.attrTypes = types;
+            this.strSizes = sizes;
+            this.numAttrs = count;
+        }
+    }
+
     
     // Current database state
     private static String currentDBName = null;
@@ -835,30 +851,35 @@ public class DBInterface {
                         } else if (indexDesc.accessType.indexType == IndexType.LSHFIndex) {
                             try {
                                 // Find the LSH index files that match this relation and column
-                                // Format: relationName + columnId + "_L" + lValue + "_h" + hValue + ".ser"
+                                // Format from createIndex: relationName + "." + columnId + "." + lValue + "." + hValue + ".ser"
                                 File dir = new File(".");
-                                String prefix = relationName + indexAttrPos + "_L";
-                                File[] matchingFiles = dir.listFiles((d, name) -> 
+                                // **FIX: Correct the prefix to match the createIndex naming convention**
+                                // The prefix should be "RELNAME.COLUMNID." to find files like "REL1.2.10.5.ser"
+                                String prefix = relationName + "." + indexAttrPos + ".";
+                                File[] matchingFiles = dir.listFiles((d, name) ->
                                     name.startsWith(prefix) && name.endsWith(".ser"));
-                                
+
                                 if (matchingFiles != null && matchingFiles.length > 0) {
                                     for (File indexFile : matchingFiles) {
                                         String indexFileName = indexFile.getName();
-                                        
+
                                         // Load the LSH index
                                         LSHFIndex lshIndex = LSHFIndex.loadIndex(indexFileName);
-                                        
+
                                         // Extract vector data from tuple
                                         int[] vectorData = tuple.getVectorFld(indexAttrPos);
                                         Vector100Dtype vectorObj = new Vector100Dtype(vectorData);
                                         Vector100DKey key = new Vector100DKey(vectorObj);
-                                        
+
                                         // Insert into LSH index
                                         lshIndex.insert(key, new RID(rid.pageNo, rid.slotNo));
-                                        
+
                                         // Save the updated index
                                         lshIndex.saveIndex(indexFileName);
                                     }
+                                } else {
+                                     // Optional: Add a warning if no index file was found for an expected index
+                                     System.err.println("Warning: No LSH index file found matching prefix '" + prefix + "' for relation '" + relationName + "' attribute " + indexAttrPos);
                                 }
                             } catch (Exception e) {
                                 System.err.println("Warning: Error updating LSH index: " + e.getMessage());
@@ -1227,33 +1248,41 @@ private static void batchDelete(String updateFileName, String relationName) thro
                             try {
                                 // Find matching LSH index files
                                 File dir = new File(".");
-                                String prefix = relationName + indexAttrPos + "_L";
-                                File[] matchingFiles = dir.listFiles((d, name) -> 
+                                // **FIX: Correct the prefix to match the createIndex naming convention**
+                                // The prefix should be "RELNAME.COLUMNID." to find files like "REL1.2.10.5.ser"
+                                String prefix = relationName + "." + indexAttrPos + "."; // Corrected prefix
+                                File[] matchingFiles = dir.listFiles((d, name) ->
                                     name.startsWith(prefix) && name.endsWith(".ser"));
-                                
+
                                 if (matchingFiles != null && matchingFiles.length > 0) {
                                     for (File indexFile : matchingFiles) {
                                         String indexFileName = indexFile.getName();
-                                        
+
                                         // Load the LSH index
                                         LSHFIndex lshIndex = LSHFIndex.loadIndex(indexFileName);
-                                        
+
                                         // Create vector key and delete
                                         if (keyValue instanceof int[]) {
                                             int[] vectorData = (int[])keyValue;
                                             Vector100Dtype vectorObj = new Vector100Dtype(vectorData);
                                             Vector100DKey key = new Vector100DKey(vectorObj);
-                                            
+
                                             // Remove from LSH index
                                             lshIndex.delete(key, deleteRid);
-                                            
+
                                             // Save the updated index
                                             lshIndex.saveIndex(indexFileName);
+                                        } else {
+                                             // Add warning if key type is unexpected
+                                             System.err.println("Warning: Expected int[] key for LSH index deletion, but got " + (keyValue != null ? keyValue.getClass().getName() : "null"));
                                         }
                                     }
+                                } else {
+                                     // Optional: Add a warning if no index file was found for an expected index
+                                     System.err.println("Warning: No LSH index file found matching prefix '" + prefix + "' for relation '" + relationName + "' attribute " + indexAttrPos + " during delete.");
                                 }
                             } catch (Exception e) {
-                                System.err.println("Warning: Error updating LSH index: " + e.getMessage());
+                                System.err.println("Warning: Error updating LSH index during delete: " + e.getMessage());
                             }
                         }
                     }
@@ -1333,6 +1362,9 @@ private static void executeQuery(String relName1, String relName2, String queryS
     // Configure buffer manager to use the specified number of buffer pages
     if (bufferPages > 0) {
         System.out.println("Note: Using up to " + bufferPages + " buffer pages (limited by current buffer pool size)");
+    } else {
+        bufferPages = DEFAULT_BUFFER_PAGES; // Use default if invalid value provided
+        System.out.println("Note: Using default " + bufferPages + " buffer pages.");
     }
     
     BufferedReader reader = null;
@@ -1351,19 +1383,19 @@ private static void executeQuery(String relName1, String relName2, String queryS
         // Parse the query to identify type and parameters
         if (queryLine.startsWith("Sort(")) {
             // Handle Sort query
-            executeSortQuery(queryLine, relName1);
+            executeSortQuery(queryLine, relName1, bufferPages); // Pass bufferPages
         } else if (queryLine.startsWith("Filter(")) {
             // Handle Filter query
-            executeFilterQuery(queryLine, relName1);
+            executeFilterQuery(queryLine, relName1, bufferPages); // Pass bufferPages
         } else if (queryLine.startsWith("Range(")) {
             // Handle Range query
-            executeRangeQuery(queryLine, relName1);
+            executeRangeQuery(queryLine, relName1, bufferPages); // Pass bufferPages
         } else if (queryLine.startsWith("NN(")) {
             // Handle Nearest Neighbor query
-            executeNNQuery(queryLine, relName1);
+            executeNNQuery(queryLine, relName1, bufferPages); // Pass bufferPages
         } else if (queryLine.startsWith("DJOIN(")) {
             // Handle Distance Join query
-            executeDJoinQuery(queryLine, relName1, relName2);
+            executeDJoinQuery(queryLine, relName1, relName2, bufferPages); // Pass bufferPages
         } else {
             throw new Exception("Unknown query type: " + queryLine);
         }
@@ -1444,57 +1476,66 @@ private static String[] parseQueryParams(String queryExpr) throws Exception {
  * 
  * @param queryExpr The full query expression
  * @param relName The name of the relation to query
+ * @param bufferPages The number of buffer pages allocated for this query
  * @throws Exception if there's an error executing the query
  */
-private static void executeSortQuery(String queryExpr, String relName) throws Exception {
+private static void executeSortQuery(String queryExpr, String relName, int bufferPages) throws Exception {
     String[] params = parseQueryParams(queryExpr);
-    
+
+    // **FIX: Interpret 3rd parameter as K (number of results)**
     if (params.length < 3) {
-        throw new Exception("Sort query requires at least 3 parameters: QA, T, D, [output fields]");
+        throw new Exception("Sort query requires at least 3 parameters: QA, T, K, [output fields]"); // Changed D to K
     }
-    
+
     // Parse parameters
-    int queryAttrNum = Integer.parseInt(params[0].trim());
-    String targetVectorFile = params[1].trim();
-    int unusedParam = Integer.parseInt(params[2].trim()); // D parameter (unused)
-    
-    // Parse output fields
-    String[] outputFields = null;
-    if (params.length > 3) {
-        String outputSpec = params[3].trim();
-        if (outputSpec.equals("*")) {
-            // All fields - will be handled later
-            outputFields = null;
-        } else {
-            // Parse list of field numbers
-            outputFields = outputSpec.split("\\s+");
+    int queryAttrNum = Integer.parseInt(params[0].trim()); // QA
+    String targetVectorFile = params[1].trim(); // T
+    int k = Integer.parseInt(params[2].trim()); // K - Number of results
+    if (k < 0) {
+         // Allow k=0 to mean "return all sorted results" for potential flexibility,
+         // but the primary use case implies k > 0.
+         System.out.println("Warning: K is negative ("+ k +"). Interpreting as return all sorted results (k=0).");
+         k = 0;
+    } else if (k == 0) {
+         System.out.println("Note: K=0 specified. Returning all sorted results.");
+    }
+
+
+    // Parse output fields specification
+    String[] outputFieldsSpec = null;
+    if (params.length > 3) { // Corrected index check
+        String outputSpec = params[3].trim(); // Corrected index
+        if (!outputSpec.equals("*")) {
+            outputFieldsSpec = outputSpec.split("\\s+");
         }
     }
-    
+
     // Read target vector from file
     int[] targetVector = readVectorFromFile(targetVectorFile);
-    
+    Vector100Dtype targetVec = new Vector100Dtype(targetVector);
+
     // Get relation information
     RelDesc relDesc = new RelDesc();
     ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(relName, relDesc);
-    
+
     // Get attribute information
     AttrDesc[] attrDescs = new AttrDesc[relDesc.attrCnt];
     for (int i = 0; i < relDesc.attrCnt; i++) {
         attrDescs[i] = new AttrDesc();
     }
     ExtendedSystemDefs.MINIBASE_ATTRCAT.getRelInfo(relName, relDesc.attrCnt, attrDescs);
-    
+
     // Verify query attribute is a vector
     if (queryAttrNum < 1 || queryAttrNum > relDesc.attrCnt) {
         throw new Exception("Invalid query attribute number: " + queryAttrNum);
     }
-    
-    if (attrDescs[queryAttrNum-1].attrType.attrType != AttrType.attrVector100D) {
-        throw new Exception("Query attribute must be a vector");
+    AttrType queryAttrType = attrDescs[queryAttrNum-1].attrType;
+    if (queryAttrType.attrType != AttrType.attrVector100D) {
+        throw new Exception("Sort query attribute QA must be a vector (type 4)");
     }
-    
-    // Setup query attributes
+    int sortFieldLength = 400; // Length of Vector100D (100 * 4 bytes)
+
+    // Setup schema attributes for the full relation
     AttrType[] attrTypes = new AttrType[relDesc.attrCnt];
     int strCount = 0;
     for (int i = 0; i < relDesc.attrCnt; i++) {
@@ -1503,8 +1544,6 @@ private static void executeSortQuery(String queryExpr, String relName) throws Ex
             strCount++;
         }
     }
-    
-    // Create string sizes array
     short[] strSizes = new short[strCount];
     int strIndex = 0;
     for (int i = 0; i < relDesc.attrCnt; i++) {
@@ -1512,64 +1551,122 @@ private static void executeSortQuery(String queryExpr, String relName) throws Ex
             strSizes[strIndex++] = (short) attrDescs[i].attrLen;
         }
     }
-    
-    // Setup projection
-    FldSpec[] projlist = createProjectionList(outputFields, relDesc.attrCnt);
-    
-    // Create FileScan to read the relation
-    FileScan scan = new FileScan(relName, attrTypes, strSizes,
-                              (short) relDesc.attrCnt, (short) projlist.length,
-                              projlist, null);
-    
-    // Create Vector100D for target
-    Vector100Dtype targetVec = new Vector100Dtype(targetVector);
-    
-    // Create Sort operator
-    // Note: Since we're sorting by distance from target vector, we need to:
-    // 1. Read all tuples
-    // 2. Calculate distance from target
-    // 3. Sort by distance
-    
-    List<Tuple> allTuples = new ArrayList<>();
-    List<Double> distances = new ArrayList<>();
-    
-    Tuple tuple = null;
-    while ((tuple = scan.get_next()) != null) {
-        // Make a copy of the tuple
-        Tuple tupleCopy = new Tuple(tuple);
-        
-        // Extract vector and calculate distance
-        int[] vectorData = tupleCopy.getVectorFld(queryAttrNum);
-        Vector100Dtype vecObj = new Vector100Dtype(vectorData);
-        double distance = targetVec.distanceTo(vecObj);
-        
-        // Store tuple and its distance
-        allTuples.add(tupleCopy);
-        distances.add(distance);
+
+    // --- Setup Projection ---
+    // Projection for the final output
+    FldSpec[] projlistOutput = createProjectionList(outputFieldsSpec, relDesc.attrCnt);
+    int outFldCnt = projlistOutput.length;
+
+    // Determine the schema of the final projected output
+    AttrType[] outTypes = new AttrType[outFldCnt];
+    List<Short> tempStrSizesList = new ArrayList<>();
+    int currentStrSizeIndex = 0;
+     for(int i=0; i<outFldCnt; i++){
+         int fldNum = projlistOutput[i].offset; // 1-based field number
+         outTypes[i] = attrTypes[fldNum-1];
+         if(outTypes[i].attrType == AttrType.attrString){
+             // Find the correct string size from the original schema's strSizes
+             int originalStrIndex = 0;
+             for(int attrIdx=0; attrIdx<fldNum-1; attrIdx++){ // Count string fields before this one
+                 if(attrTypes[attrIdx].attrType == AttrType.attrString) originalStrIndex++;
+             }
+             if (originalStrIndex < strSizes.length) {
+                 tempStrSizesList.add(strSizes[originalStrIndex]);
+             } else {
+                 // This should not happen if schema is consistent
+                 throw new Exception("Error determining string size for projected field " + fldNum);
+             }
+         }
+     }
+     short[] outStrSizes = new short[tempStrSizesList.size()];
+     for(int i=0; i<tempStrSizesList.size(); i++) outStrSizes[i] = tempStrSizesList.get(i);
+
+
+    // Projection for the FileScan feeding into Sort. Must include the sort field.
+    // Projecting all fields is simplest.
+    FldSpec[] projScan = new FldSpec[relDesc.attrCnt];
+    for (int i = 0; i < relDesc.attrCnt; i++) {
+        projScan[i] = new FldSpec(new RelSpec(RelSpec.outer), i + 1);
     }
-    
-    // Sort tuples by distance
-    List<Integer> indices = new ArrayList<>();
-    for (int i = 0; i < allTuples.size(); i++) {
-        indices.add(i);
+
+    // --- Create Iterators ---
+    FileScan fileScan = null;
+    iterator.Sort sortIterator = null;
+    try {
+        // 1. FileScan to read the base relation
+        fileScan = new FileScan(relName, attrTypes, strSizes,
+                                (short) relDesc.attrCnt, (short) projScan.length,
+                                projScan, null); // No filter here
+
+        // 2. Sort iterator
+        // **FIX: Pass K (number of results) to the Sort iterator**
+        sortIterator = new iterator.Sort(
+            attrTypes,         // Schema of tuples from fileScan
+            (short)relDesc.attrCnt,
+            strSizes,
+            fileScan,          // Input iterator
+            queryAttrNum,      // Sort field number (QA)
+            new TupleOrder(TupleOrder.Ascending), // Sort by ascending distance
+            sortFieldLength,   // Length of the sort field (vector)
+            bufferPages,       // Buffer pages
+            targetVec,         // Target vector for distance calculation
+            k                  // Pass K (number of results)
+        );
+
+        // --- Process Sorted Results ---
+        // **FIX: Update print statement to reflect K**
+        System.out.println("Sort query results (Top " + (k > 0 ? k : "All") + " nearest neighbors):");
+        System.out.println("---------------------------------------------");
+        System.out.println("Distance | Tuple");
+        System.out.println("---------------------------------------------");
+
+        Tuple sortedTuple;
+        int resultCount = 0;
+        Tuple outputTuple = new Tuple(); // Reusable tuple for projection
+        // Set header for the output tuple based on the projected schema
+        outputTuple.setHdr((short)outFldCnt, outTypes, outStrSizes);
+
+
+        // The Sort iterator will stop after K results if K > 0
+        while ((sortedTuple = sortIterator.get_next()) != null) {
+            // Calculate distance for the current tuple (needed for display)
+            double distance = -1.0;
+            try {
+                int[] vectorData = sortedTuple.getVectorFld(queryAttrNum);
+                Vector100Dtype vecObj = new Vector100Dtype(vectorData);
+                distance = targetVec.distanceTo(vecObj);
+            } catch (Exception e) {
+                System.err.println("Warning: Could not calculate distance for a sorted tuple. Skipping.");
+                continue;
+            }
+
+            // **FIX: Remove the distance threshold (D) filtering**
+            // The Sort iterator already limits to K results if K > 0.
+
+            // Project the tuple according to the output specification
+            Projection.Project(sortedTuple, attrTypes, outputTuple, projlistOutput, outFldCnt);
+            // The outputTuple now has the projected fields. Use its schema (outTypes, outStrSizes)
+            // **FIX: Use outTypes for tupleToString**
+            System.out.printf("%.2f | %s%n", distance, tupleToString(outputTuple, projlistOutput, outTypes));
+            resultCount++;
+
+        }
+
+        // Print summary
+        System.out.println("---------------------------------------------");
+        // **FIX: Update summary message**
+        System.out.println("Total records returned: " + resultCount + (k > 0 ? " (limited to K=" + k + ")" : ""));
+
+    } finally {
+        // Close the Sort iterator (which should close the underlying FileScan)
+        if (sortIterator != null) {
+            sortIterator.close();
+        }
+        // Defensive closing, though Sort should handle it.
+        // else if (fileScan != null) {
+        //     fileScan.close();
+        // }
     }
-    
-    // Sort indices by corresponding distances
-    indices.sort(Comparator.comparing(distances::get));
-    
-    // Print header
-    System.out.println("Sort query results:");
-    System.out.println("-------------------");
-    System.out.println("Distance | Tuple");
-    System.out.println("-------------------");
-    
-    // Output sorted tuples
-    for (int idx : indices) {
-        System.out.printf("%.2f | %s%n", distances.get(idx), tupleToString(allTuples.get(idx), projlist, attrTypes));
-    }
-    
-    // Close resources
-    scan.close();
 }
 
 /**
@@ -1585,27 +1682,33 @@ private static int[] readVectorFromFile(String filename) throws Exception {
         reader = new BufferedReader(new FileReader(filename));
         String line = reader.readLine();
         if (line == null) {
-            throw new Exception("Vector file is empty");
+            throw new Exception("Vector file is empty: " + filename);
         }
-        
+
+        // Handle potential extra spaces and split
         String[] values = line.trim().split("\\s+");
         if (values.length != 100) {
-            throw new Exception("Vector must have exactly 100 values");
+             // Check if the first element is empty string due to leading space
+             if (values.length == 101 && values[0].isEmpty()) {
+                 values = Arrays.copyOfRange(values, 1, 101);
+             } else {
+                throw new Exception("Vector file must contain exactly 100 integer values, found " + values.length + " in: " + filename);
+             }
         }
-        
+
         int[] vector = new int[100];
         for (int i = 0; i < 100; i++) {
-            int val = Integer.parseInt(values[i]);
-            if (val < -10000 || val > 10000) {
-                throw new Exception("Vector values must be in range -10000 to 10000");
+            try {
+                vector[i] = Integer.parseInt(values[i]);
+            } catch (NumberFormatException e) {
+                throw new Exception("Invalid integer value '" + values[i] + "' at position " + i + " in vector file: " + filename);
             }
-            vector[i] = val;
         }
-        
+
         return vector;
     } finally {
         if (reader != null) {
-            try { reader.close(); } catch (Exception e) { /* Ignore */ }
+             try { reader.close(); } catch (IOException e) {}
         }
     }
 }
@@ -1619,22 +1722,29 @@ private static int[] readVectorFromFile(String filename) throws Exception {
  */
 private static FldSpec[] createProjectionList(String[] outputFields, int attrCount) {
     FldSpec[] projlist;
-    
+
     if (outputFields == null || outputFields.length == 0) {
         // Use all fields
         projlist = new FldSpec[attrCount];
         for (int i = 0; i < attrCount; i++) {
-            projlist[i] = new FldSpec(new RelSpec(RelSpec.outer), i+1);
+             projlist[i] = new FldSpec(new RelSpec(RelSpec.outer), i + 1);
         }
     } else {
         // Use specified fields
         projlist = new FldSpec[outputFields.length];
         for (int i = 0; i < outputFields.length; i++) {
-            int fieldNum = Integer.parseInt(outputFields[i]);
-            projlist[i] = new FldSpec(new RelSpec(RelSpec.outer), fieldNum);
+             try {
+                 int fieldNum = Integer.parseInt(outputFields[i].trim());
+                 if (fieldNum < 1 || fieldNum > attrCount) {
+                     throw new IllegalArgumentException("Output field number " + fieldNum + " out of range (1-" + attrCount + ")");
+                 }
+                 projlist[i] = new FldSpec(new RelSpec(RelSpec.outer), fieldNum);
+             } catch (NumberFormatException e) {
+                 throw new IllegalArgumentException("Invalid output field number: " + outputFields[i]);
+             }
         }
     }
-    
+
     return projlist;
 }
 
@@ -1649,30 +1759,47 @@ private static FldSpec[] createProjectionList(String[] outputFields, int attrCou
  */
 private static String tupleToString(Tuple tuple, FldSpec[] projlist, AttrType[] attrTypes) throws Exception {
     StringBuilder sb = new StringBuilder("[");
-    
+
     for (int i = 0; i < projlist.length; i++) {
-        int fieldNum = projlist[i].offset;
-        
+        int fieldNum = projlist[i].offset; // 1-based field number
+
         if (i > 0) {
             sb.append(", ");
         }
-        
-        switch (attrTypes[fieldNum-1].attrType) {
-            case AttrType.attrInteger:
-                sb.append(tuple.getIntFld(fieldNum));
-                break;
-            case AttrType.attrReal:
-                sb.append(tuple.getFloFld(fieldNum));
-                break;
-            case AttrType.attrString:
-                sb.append('"').append(tuple.getStrFld(fieldNum)).append('"');
-                break;
-            case AttrType.attrVector100D:
-                sb.append("Vector[...])"); // Abbreviated for display
-                break;
+
+        // Get type from the original schema using fieldNum - 1
+        AttrType fieldType = attrTypes[fieldNum-1];
+
+        try {
+            switch (fieldType.attrType) {
+                case AttrType.attrInteger:
+                    sb.append(tuple.getIntFld(fieldNum));
+                    break;
+                case AttrType.attrReal:
+                    sb.append(tuple.getFloFld(fieldNum));
+                    break;
+                case AttrType.attrString:
+                    sb.append(tuple.getStrFld(fieldNum));
+                    break;
+                case AttrType.attrVector100D:
+                    int[] vec = tuple.getVectorFld(fieldNum);
+                    // Print only first few elements for brevity
+                    sb.append("Vec{");
+                    for(int j=0; j<Math.min(vec.length, 5); j++) {
+                        sb.append(vec[j]).append(j < Math.min(vec.length, 5) - 1 ? "," : "");
+                    }
+                    if (vec.length > 5) sb.append("...");
+                    sb.append("}");
+                    break;
+                default:
+                     sb.append("?"); // Unknown type
+            }
+        } catch (FieldNumberOutOfBoundException e) {
+             // This shouldn't happen if projlist is correct
+             sb.append("ERR_FLD");
         }
     }
-    
+
     sb.append("]");
     return sb.toString();
 }
@@ -1685,24 +1812,38 @@ private static String tupleToString(Tuple tuple, FldSpec[] projlist, AttrType[] 
  * 
  * @param queryExpr The full query expression
  * @param relName The name of the relation to query
+ * @param bufferPages The number of buffer pages allocated for this query
  * @throws Exception if there's an error executing the query
  */
-private static void executeFilterQuery(String queryExpr, String relName) throws Exception {
+private static void executeFilterQuery(String queryExpr, String relName, int bufferPages) throws Exception {
+    // NOTE: bufferPages is passed but not directly used by FileScan or IndexScan constructors.
+    // It influences the global buffer pool size set during 'open database'.
     String[] params = parseQueryParams(queryExpr);
-    
-    if (params.length < 3) {
-        throw new Exception("Filter query requires at least 3 parameters: QA, T, I, [output fields]");
+
+    // **FIX: Expect K as the 3rd parameter, I as the 4th**
+    if (params.length < 4) { // Changed from 3 to 4
+        throw new Exception("Filter query requires at least 4 parameters: QA, T, K, I, [output fields]"); // Added K
     }
-    
+
     // Parse parameters
     int queryAttrNum = Integer.parseInt(params[0].trim());
     String targetValue = params[1].trim();
-    String indexOption = params[2].trim();
-    
+    // **FIX: Parse K**
+    int k = Integer.parseInt(params[2].trim()); // K - Number of results
+    String indexOption = params[3].trim(); // I is now the 4th parameter
+
+    if (k < 0) {
+        System.out.println("Warning: K is negative ("+ k +"). Interpreting as return all matching results (k=0).");
+        k = 0;
+    } else if (k == 0) {
+        System.out.println("Note: K=0 specified. Returning all matching results.");
+    }
+
     // Parse output fields
     String[] outputFields = null;
-    if (params.length > 3) {
-        String outputSpec = params[3].trim();
+    // **FIX: Check params.length > 4 for output fields**
+    if (params.length > 4) {
+        String outputSpec = params[4].trim(); // Output spec is now the 5th parameter
         if (outputSpec.equals("*")) {
             // All fields - will be handled later
             outputFields = null;
@@ -1711,28 +1852,28 @@ private static void executeFilterQuery(String queryExpr, String relName) throws 
             outputFields = outputSpec.split("\\s+");
         }
     }
-    
+
     // Get relation information
     RelDesc relDesc = new RelDesc();
     ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(relName, relDesc);
-    
+
     // Get attribute information
     AttrDesc[] attrDescs = new AttrDesc[relDesc.attrCnt];
     for (int i = 0; i < relDesc.attrCnt; i++) {
         attrDescs[i] = new AttrDesc();
     }
     ExtendedSystemDefs.MINIBASE_ATTRCAT.getRelInfo(relName, relDesc.attrCnt, attrDescs);
-    
+
     // Verify query attribute is valid
     if (queryAttrNum < 1 || queryAttrNum > relDesc.attrCnt) {
         throw new Exception("Invalid query attribute number: " + queryAttrNum);
     }
-    
+
     // Ensure field is not a vector (requirement for Filter query)
     if (attrDescs[queryAttrNum-1].attrType.attrType == AttrType.attrVector100D) {
         throw new Exception("Filter query requires a non-vector attribute");
     }
-    
+
     // Setup query attributes
     AttrType[] attrTypes = new AttrType[relDesc.attrCnt];
     int strCount = 0;
@@ -1742,7 +1883,7 @@ private static void executeFilterQuery(String queryExpr, String relName) throws 
             strCount++;
         }
     }
-    
+
     // Create string sizes array
     short[] strSizes = new short[strCount];
     int strIndex = 0;
@@ -1751,17 +1892,17 @@ private static void executeFilterQuery(String queryExpr, String relName) throws 
             strSizes[strIndex++] = (short) attrDescs[i].attrLen;
         }
     }
-    
+
     // Setup projection
     FldSpec[] projlist = createProjectionList(outputFields, relDesc.attrCnt);
-    
+
     // Create condition for filtering
     CondExpr[] expr = new CondExpr[2]; // We need 2: one for the condition, one for null termination
     expr[0] = new CondExpr();
     expr[0].op = new AttrOperator(AttrOperator.aopEQ); // Equality operator
     expr[0].type1 = new AttrType(AttrType.attrSymbol);
     expr[0].operand1.symbol = new FldSpec(new RelSpec(RelSpec.outer), queryAttrNum);
-    
+
     // Set operand2 based on the attribute type
     switch (attrTypes[queryAttrNum-1].attrType) {
         case AttrType.attrInteger:
@@ -1779,30 +1920,30 @@ private static void executeFilterQuery(String queryExpr, String relName) throws 
         default:
             throw new Exception("Unsupported attribute type for filter");
     }
-    
+
     expr[1] = null; // Mark the end of the conditions
-    
+
     // Determine if we should use index
     boolean useIndex = indexOption.equalsIgnoreCase("H");
-    
+
     iterator.Iterator scan = null;
-    
+
     try {
         // Create appropriate scan based on index option
         if (useIndex) {
             // Check if BTree index exists for this attribute
             boolean indexFound = false;
             int indexCount = relDesc.indexCnt;
-            
+
             if (indexCount > 0) {
                 IndexDesc[] indexDescs = new IndexDesc[indexCount];
                 for (int i = 0; i < indexCount; i++) {
                     indexDescs[i] = new IndexDesc();
                 }
-                
+
                 try {
                     ExtendedSystemDefs.MINIBASE_INDCAT.getRelInfo(relName, indexCount, indexDescs);
-                    
+
                     // Find matching index for our attribute
                     for (int i = 0; i < indexCount; i++) {
                         // Find the attribute position for this index
@@ -1813,30 +1954,30 @@ private static void executeFilterQuery(String queryExpr, String relName) throws 
                                 break;
                             }
                         }
-                        
+
                         // If this index matches our query attribute and is a BTree
-                        if (indexAttrPos == queryAttrNum && 
+                        if (indexAttrPos == queryAttrNum &&
                             indexDescs[i].accessType.indexType == IndexType.B_Index) {
-                            
+
                             // Get index name
                             String indexName = ExtendedSystemDefs.MINIBASE_INDCAT.buildIndexName(
                                 relName, indexDescs[i].attrName, indexDescs[i].accessType);
-                            
+
                             // Create index scan
                             scan = new IndexScan(
                                 new IndexType(IndexType.B_Index),
-                                relName, 
+                                relName,
                                 indexName,
-                                attrTypes, 
+                                attrTypes,
                                 strSizes,
-                                relDesc.attrCnt, 
+                                relDesc.attrCnt,
                                 projlist.length,
-                                projlist, 
+                                projlist,
                                 expr,
                                 queryAttrNum,  // field number of the indexed field
                                 false         // false = return full tuple, not just index key
                             );
-                            
+
                             indexFound = true;
                             System.out.println("Using BTree index for filter query");
                             break;
@@ -1846,7 +1987,7 @@ private static void executeFilterQuery(String queryExpr, String relName) throws 
                     System.err.println("Warning: Error accessing index information: " + e.getMessage());
                 }
             }
-            
+
             if (!indexFound) {
                 System.out.println("No suitable index found, using sequential scan");
                 scan = new FileScan(relName, attrTypes, strSizes,
@@ -1855,28 +1996,32 @@ private static void executeFilterQuery(String queryExpr, String relName) throws 
             }
         } else {
             // Use FileScan (no index)
+            System.out.println("Using sequential scan for filter query");
             scan = new FileScan(relName, attrTypes, strSizes,
                 (short) relDesc.attrCnt, (short) projlist.length,
                 projlist, expr);
         }
-        
+
         // Print header
-        System.out.println("Filter query results:");
+        // **FIX: Update print statement to reflect K**
+        System.out.println("Filter query results" + (k > 0 ? " (Top " + k + ")" : "") + ":");
         System.out.println("--------------------");
-        
+
         // Retrieve and print results
         int resultCount = 0;
         Tuple tuple = null;
-        
-        while ((tuple = scan.get_next()) != null) {
+
+        // **FIX: Add check for K in the loop**
+        while ((k == 0 || resultCount < k) && (tuple = scan.get_next()) != null) {
             System.out.println(tupleToString(tuple, projlist, attrTypes));
-            resultCount++;
+            resultCount++; // Increment count after processing a tuple
         }
-        
+
         // Print summary
         System.out.println("--------------------");
-        System.out.println("Total records found: " + resultCount);
-        
+        // **FIX: Update summary message**
+        System.out.println("Total records returned: " + resultCount + (k > 0 ? " (limited to K=" + k + ")" : ""));
+
     } finally {
         // Close the scan
         if (scan != null) {
@@ -1891,9 +2036,11 @@ private static void executeFilterQuery(String queryExpr, String relName) throws 
  * 
  * @param queryExpr The full query expression
  * @param relName The name of the relation to query
+ * @param bufferPages The number of buffer pages allocated for this query
  * @throws Exception if there's an error executing the query
  */
-private static void executeRangeQuery(String queryExpr, String relName) throws Exception {
+private static void executeRangeQuery(String queryExpr, String relName, int bufferPages) throws Exception {
+    // NOTE: bufferPages is passed but not directly used by FileScan or RSIndexScan constructors.
     String[] params = parseQueryParams(queryExpr);
     
     if (params.length < 4) {
@@ -1974,87 +2121,38 @@ private static void executeRangeQuery(String queryExpr, String relName) throws E
     
     iterator.Iterator scan = null;
     int resultCount = 0;
+    String indexNameToUse = null; // Store the index name if found
     
     try {
         if (useIndex) {
-            // Try to find an appropriate LSH index for the vector attribute
-            boolean indexFound = false;
-            int indexCount = relDesc.indexCnt;
-            
-            if (indexCount > 0) {
-                IndexDesc[] indexDescs = new IndexDesc[indexCount];
-                for (int i = 0; i < indexCount; i++) {
-                    indexDescs[i] = new IndexDesc();
-                }
-                
-                try {
-                    ExtendedSystemDefs.MINIBASE_INDCAT.getRelInfo(relName, indexCount, indexDescs);
-                    
-                    // Find matching index for our attribute
-                    for (int i = 0; i < indexCount; i++) {
-                        // Find the attribute position for this index
-                        int indexAttrPos = -1;
-                        for (int j = 0; j < relDesc.attrCnt; j++) {
-                            if (attrDescs[j].attrName.equals(indexDescs[i].attrName)) {
-                                indexAttrPos = j + 1; // Convert to 1-based
-                                break;
-                            }
-                        }
-                        
-                        // If this index matches our query attribute and is an LSH index
-                        if (indexAttrPos == queryAttrNum && 
-                            indexDescs[i].accessType.indexType == IndexType.LSHFIndex) {
-                            
-                            // Get index name - we need to find the actual LSH file
-                            // Format is typically: relationName + columnId + "_L" + lValue + "_h" + hValue + ".ser"
-                            File dir = new File(".");
-                            String prefix = relName + queryAttrNum + "_L";
-                            File[] matchingFiles = dir.listFiles((d, name) -> 
-                                name.startsWith(prefix) && name.endsWith(".ser"));
-                            
-                            if (matchingFiles != null && matchingFiles.length > 0) {
-                                String indexName = matchingFiles[0].getName();
-                                
-                                System.out.println("Using LSH index for range query: " + indexName);
-                                
-                                // Create a null CondExpr array - not needed for RSIndexScan
-                                CondExpr[] selects = null;
-                                
-                                // Create RSIndexScan
-                                scan = new RSIndexScan(
-                                    new IndexType(IndexType.LSHFIndex),
-                                    relName,
-                                    indexName,
-                                    attrTypes,
-                                    strSizes,
-                                    relDesc.attrCnt, 
-                                    projlist.length,
-                                    projlist,
-                                    selects,
-                                    queryAttrNum, 
-                                    targetVec,
-                                    rangeDistance
-                                );
-                                
-                                indexFound = true;
-                                break;
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    System.err.println("Warning: Error accessing index information: " + e.getMessage());
-                }
-            }
-            
-            if (!indexFound) {
+            indexNameToUse = findLSHIndex(relName, queryAttrNum, relDesc, attrDescs);
+            if (indexNameToUse != null) {
+                System.out.println("Using LSH index for range query: " + indexNameToUse);
+                // Create RSIndexScan
+                scan = new RSIndexScan(
+                    new IndexType(IndexType.LSHFIndex),
+                    relName,
+                    indexNameToUse,
+                    attrTypes,
+                    strSizes,
+                    relDesc.attrCnt,
+                    projlist.length,
+                    projlist,
+                    null, // No selection conditions for RSIndexScan itself
+                    queryAttrNum,
+                    targetVec,
+                    rangeDistance
+                );
+            } else {
                 System.out.println("No suitable LSH index found, using sequential scan");
-                useIndex = false;
+                useIndex = false; // Fallback to sequential scan
             }
         }
         
         // If we couldn't use an index (or chose not to), use sequential scan
         if (scan == null) {
-            // Regular sequential scan with manual filtering
+            System.out.println("Using sequential scan for range query");
+            // Regular sequential scan with manual filtering needed later
             scan = new FileScan(relName, attrTypes, strSizes,
                 (short) relDesc.attrCnt, (short) projlist.length,
                 projlist, null);
@@ -2069,29 +2167,27 @@ private static void executeRangeQuery(String queryExpr, String relName) throws E
         // Process results
         Tuple tuple = null;
         while ((tuple = scan.get_next()) != null) {
-            // For RSIndexScan, tuples are already filtered by distance
-            // For FileScan, we need to filter them manually
+            // Calculate distance regardless of scan type for printing
+            double distance = -1.0; // Default invalid distance
+             try {
+                int[] vectorData = tuple.getVectorFld(queryAttrNum);
+                Vector100Dtype vecObj = new Vector100Dtype(vectorData);
+                distance = targetVec.distanceTo(vecObj);
+             } catch (Exception e) {
+                 System.err.println("Warning: Could not calculate distance for a tuple. Skipping.");
+                 continue;
+             }
+
+
+            // If using FileScan, we need to filter manually
             if (!useIndex) {
-                // Get vector and calculate distance
-                int[] vectorData = tuple.getVectorFld(queryAttrNum);
-                Vector100Dtype vecObj = new Vector100Dtype(vectorData);
-                double distance = targetVec.distanceTo(vecObj);
-                
-                // Skip if outside the range
                 if (distance > rangeDistance) {
-                    continue;
+                    continue; // Skip if outside the range
                 }
-                
-                // Print with distance
-                System.out.printf("%.2f | %s%n", distance, tupleToString(tuple, projlist, attrTypes));
-            } else {
-                // For RSIndexScan results, we don't have the distance directly
-                // We'd need to recalculate or modify RSIndexScan to return distances
-                int[] vectorData = tuple.getVectorFld(queryAttrNum);
-                Vector100Dtype vecObj = new Vector100Dtype(vectorData);
-                double distance = targetVec.distanceTo(vecObj);
-                System.out.printf("%.2f | %s%n", distance, tupleToString(tuple, projlist, attrTypes));
             }
+            // If using RSIndexScan, it's already filtered, just print
+
+            System.out.printf("%.2f | %s%n", distance, tupleToString(tuple, projlist, attrTypes));
             resultCount++;
         }
         
@@ -2107,15 +2203,18 @@ private static void executeRangeQuery(String queryExpr, String relName) throws E
     }
 }
 
+
 /**
  * Execute a Nearest Neighbor query on vector data.
  * Format: NN(QA, T, K, I, ...)
  * 
  * @param queryExpr The full query expression
  * @param relName The name of the relation to query
+ * @param bufferPages The number of buffer pages allocated for this query
  * @throws Exception if there's an error executing the query
  */
-private static void executeNNQuery(String queryExpr, String relName) throws Exception {
+private static void executeNNQuery(String queryExpr, String relName, int bufferPages) throws Exception {
+    // NOTE: bufferPages is passed but not directly used by FileScan or NNIndexScan constructors.
     String[] params = parseQueryParams(queryExpr);
     
     if (params.length < 4) {
@@ -2195,117 +2294,61 @@ private static void executeNNQuery(String queryExpr, String relName) throws Exce
     boolean useIndex = indexOption.equalsIgnoreCase("H");
     
     iterator.Iterator scan = null;
+    String indexNameToUse = null;
     
     try {
         if (useIndex) {
-            // Try to find an appropriate LSH index for the vector attribute
-            boolean indexFound = false;
-            int indexCount = relDesc.indexCnt;
-            
-            if (indexCount > 0) {
-                IndexDesc[] indexDescs = new IndexDesc[indexCount];
-                for (int i = 0; i < indexCount; i++) {
-                    indexDescs[i] = new IndexDesc();
-                }
-                
-                try {
-                    ExtendedSystemDefs.MINIBASE_INDCAT.getRelInfo(relName, indexCount, indexDescs);
-                    
-                    // Find matching index for our attribute
-                    for (int i = 0; i < indexCount; i++) {
-                        // Find the attribute position for this index
-                        int indexAttrPos = -1;
-                        for (int j = 0; j < relDesc.attrCnt; j++) {
-                            if (attrDescs[j].attrName.equals(indexDescs[i].attrName)) {
-                                indexAttrPos = j + 1; // Convert to 1-based
-                                break;
-                            }
-                        }
-                        
-                        // If this index matches our query attribute and is an LSH index
-                        if (indexAttrPos == queryAttrNum && 
-                            indexDescs[i].accessType.indexType == IndexType.LSHFIndex) {
-                            
-                            // Get index name - find the actual LSH file
-                            File dir = new File(".");
-                            String prefix = relName + queryAttrNum + "_L";
-                            File[] matchingFiles = dir.listFiles((d, name) -> 
-                                name.startsWith(prefix) && name.endsWith(".ser"));
-                            
-                            if (matchingFiles != null && matchingFiles.length > 0) {
-                                String indexName = matchingFiles[0].getName();
-                                
-                                System.out.println("Using LSH index for NN query: " + indexName);
-                                
-                                // Create NNIndexScan
-                                scan = new NNIndexScan(
-                                    new IndexType(IndexType.LSHFIndex),
-                                    relName,
-                                    indexName,
-                                    attrTypes,
-                                    strSizes,
-                                    relDesc.attrCnt, 
-                                    projlist.length,
-                                    projlist,
-                                    null,      // No condition expressions needed
-                                    queryAttrNum, 
-                                    targetVec,
-                                    k          // Number of nearest neighbors to return
-                                );
-                                
-                                indexFound = true;
-                                break;
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    System.err.println("Warning: Error accessing index information: " + e.getMessage());
-                }
-            }
-            
-            if (!indexFound) {
+            indexNameToUse = findLSHIndex(relName, queryAttrNum, relDesc, attrDescs);
+            if (indexNameToUse != null) {
+                System.out.println("Using LSH index for NN query: " + indexNameToUse);
+                // Create NNIndexScan
+                scan = new NNIndexScan(
+                    new IndexType(IndexType.LSHFIndex),
+                    relName,
+                    indexNameToUse,
+                    attrTypes,
+                    strSizes,
+                    relDesc.attrCnt,
+                    projlist.length,
+                    projlist,
+                    null,      // No condition expressions needed
+                    queryAttrNum,
+                    targetVec,
+                    k          // Number of nearest neighbors to return
+                );
+            } else {
                 System.out.println("No suitable LSH index found, using sequential scan");
-                useIndex = false;
+                useIndex = false; // Fallback to sequential scan
             }
         }
         
         // If no index available or chosen, use sequential scan with manual sorting
-        List<Tuple> allTuples = new ArrayList<>();
-        List<Double> distances = new ArrayList<>();
-        
         if (scan == null) {
             System.out.println("Performing sequential scan for NN query");
             
             // Use FileScan for full relation scan
-            scan = new FileScan(relName, attrTypes, strSizes,
+            FileScan fileScan = new FileScan(relName, attrTypes, strSizes,
                 (short) relDesc.attrCnt, (short) projlist.length,
                 projlist, null);
-                
+            
             // Read all tuples, calculate distances and store them
+            List<Tuple> allTuples = new ArrayList<>();
+            List<Double> distances = new ArrayList<>();
             Tuple tuple;
-            while ((tuple = scan.get_next()) != null) {
-                // Make a copy of the tuple
-                Tuple tupleCopy = new Tuple(tuple);
+            while ((tuple = fileScan.get_next()) != null) {
+                // Make a copy
+                Tuple tupleCopy = new Tuple(tuple.getTupleByteArray(), tuple.getOffset(), tuple.getLength());
+                tupleCopy.setHdr((short)attrTypes.length, attrTypes, strSizes);
                 
-                // Extract vector and calculate distance
+                // Calculate distance
                 int[] vectorData = tupleCopy.getVectorFld(queryAttrNum);
                 Vector100Dtype vecObj = new Vector100Dtype(vectorData);
                 double distance = targetVec.distanceTo(vecObj);
                 
-                // Store tuple and its distance
                 allTuples.add(tupleCopy);
                 distances.add(distance);
             }
-            
-            // Close scan as we've loaded all tuples
-            scan.close();
-            scan = null;
-            
-            // Print header
-            System.out.println("NN query results (k=" + k + "):");
-            System.out.println("---------------------------------------------");
-            System.out.println("Distance | Tuple");
-            System.out.println("---------------------------------------------");
+            fileScan.close(); // Close the filescan
             
             // Sort indices by corresponding distances
             List<Integer> indices = new ArrayList<>();
@@ -2314,38 +2357,47 @@ private static void executeNNQuery(String queryExpr, String relName) throws Exce
             }
             indices.sort(Comparator.comparing(distances::get));
             
+            // Print header
+            System.out.println("NN query results (k=" + k + "):");
+            System.out.println("---------------------------------------------");
+            System.out.println("Distance | Tuple");
+            System.out.println("---------------------------------------------");
+            
             // Output k nearest neighbors or all if k=0
             int resultCount = (k == 0) ? allTuples.size() : Math.min(k, allTuples.size());
             for (int i = 0; i < resultCount; i++) {
                 int idx = indices.get(i);
-                System.out.printf("%.2f | %s%n", distances.get(idx), 
+                System.out.printf("%.2f | %s%n", distances.get(idx),
                     tupleToString(allTuples.get(idx), projlist, attrTypes));
             }
             
             // Print summary
             System.out.println("---------------------------------------------");
             System.out.println("Total records found: " + resultCount);
-        } 
-        else {
-            // Print header for indexed search
+            
+        } else {
+            // Process indexed results (already limited to k nearest neighbors by NNIndexScan)
             System.out.println("NN query results (k=" + k + "):");
             System.out.println("---------------------------------------------");
             System.out.println("Distance | Tuple");
             System.out.println("---------------------------------------------");
             
-            // Process indexed results (already limited to k nearest neighbors)
             int resultCount = 0;
             Tuple tuple;
-            
             while ((tuple = scan.get_next()) != null) {
-                // For NNIndexScan results, we need to manually calculate distance for display
-                int[] vectorData = tuple.getVectorFld(queryAttrNum);
-                Vector100Dtype vecObj = new Vector100Dtype(vectorData);
-                double distance = targetVec.distanceTo(vecObj);
+                // Calculate distance for display
+                double distance = -1.0;
+                try {
+                    int[] vectorData = tuple.getVectorFld(queryAttrNum);
+                    Vector100Dtype vecObj = new Vector100Dtype(vectorData);
+                    distance = targetVec.distanceTo(vecObj);
+                } catch (Exception e) {
+                     System.err.println("Warning: Could not calculate distance for a tuple. Skipping.");
+                     continue;
+                }
                 
-                System.out.printf("%.2f | %s%n", distance, 
+                System.out.printf("%.2f | %s%n", distance,
                     tupleToString(tuple, projlist, attrTypes));
-                    
                 resultCount++;
             }
             
@@ -2355,311 +2407,489 @@ private static void executeNNQuery(String queryExpr, String relName) throws Exce
         }
     }
     finally {
-        // Close the scan if still open
+        // Close the scan if it was created and not already closed (e.g., NNIndexScan)
         if (scan != null) {
             scan.close();
         }
     }
 }
 
-private static void executeDJoinQuery(String queryExpr, String relName1, String relName2) throws Exception {
+
+/**
+ * Execute a Distance Join query.
+ * Format: DJOIN(OuterSpec, QA2, D, I2, [OutputFields])
+ * OuterSpec can be QA1 (int) or Range(...) or NN(...)
+ * 
+ * @param queryExpr The full query expression
+ * @param defaultRelName1 Default outer relation name (used if OuterSpec is just QA1)
+ * @param relName2 Inner relation name
+ * @param bufferPages The number of buffer pages allocated for this query
+ * @throws Exception if there's an error executing the query
+ */
+private static void executeDJoinQuery(String queryExpr, String defaultRelName1, String relName2, int bufferPages) throws Exception {
     String[] params = parseQueryParams(queryExpr);
-    
+
     if (params.length < 4) {
-        throw new Exception("DJOIN query requires at least 4 parameters: QA1, QA2, D, I, [output fields]");
+        throw new Exception("DJOIN query requires at least 4 parameters: OuterSpec, QA2, D, I2, [OutputFields]");
     }
-    
-    // Parse parameters
-    int queryAttr1 = Integer.parseInt(params[0].trim());
-    int queryAttr2 = Integer.parseInt(params[1].trim());
-    int distance = Integer.parseInt(params[2].trim());
-    String indexOption = params[3].trim();
-    
-    if (distance < 0) {
+
+    String outerSpec = params[0].trim();
+    int queryAttr2 = Integer.parseInt(params[1].trim()); // QA2
+    int distanceThreshold = Integer.parseInt(params[2].trim()); // D
+    String indexOptionInner = params[3].trim(); // I2
+
+    if (distanceThreshold < 0) {
         throw new Exception("Distance Join threshold D must be non-negative");
     }
-    
-    // Parse output fields
-    String[] outputFields = null;
+
+    // Parse output fields specification
+    String[] outputFieldsSpec = null;
     if (params.length > 4) {
         String outputSpec = params[4].trim();
         if (!outputSpec.equals("*")) {
-            outputFields = outputSpec.split("\\s+");
+            outputFieldsSpec = outputSpec.split("\\s+");
         }
     }
-    
-    // Get relation information for both relations
-    RelDesc relDesc1 = new RelDesc();
+
+    OuterQueryResult outerResult;
+    String outerRelName;
+    int queryAttr1; // QA1
+
+    // Determine if the outer spec is a nested query or just an attribute number
+    if (outerSpec.startsWith("Range(") || outerSpec.startsWith("NN(")) {
+        // --- Outer is a nested query ---
+        String[] outerParams = parseQueryParams(outerSpec);
+        if (outerParams.length < 2) throw new Exception("Nested outer query needs at least QA and T parameters");
+
+        queryAttr1 = Integer.parseInt(outerParams[0].trim()); // QA1 from nested query
+        // The second parameter of Range/NN is the target vector file, NOT the relation name.
+        // The relation name for the outer query must be defaultRelName1.
+        outerRelName = defaultRelName1;
+
+        // Pass bufferPages to the helper method
+        outerResult = getOuterIteratorAndSchema(outerSpec, outerRelName, bufferPages);
+
+    } else {
+         // --- Outer is the full relation (defaultRelName1) ---
+         try {
+             queryAttr1 = Integer.parseInt(outerSpec); // QA1 is just the attribute number
+             outerRelName = defaultRelName1;
+
+             // Get schema for the full outer relation
+             RelDesc relDesc1 = new RelDesc();
+             ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(outerRelName, relDesc1);
+             AttrDesc[] attrDescs1 = new AttrDesc[relDesc1.attrCnt];
+             for (int i = 0; i < relDesc1.attrCnt; i++) attrDescs1[i] = new AttrDesc();
+             ExtendedSystemDefs.MINIBASE_ATTRCAT.getRelInfo(outerRelName, relDesc1.attrCnt, attrDescs1);
+
+             AttrType[] attrTypes1 = new AttrType[relDesc1.attrCnt];
+             int strCount1 = 0;
+             for (int i = 0; i < relDesc1.attrCnt; i++) {
+                 attrTypes1[i] = attrDescs1[i].attrType;
+                 if (attrTypes1[i].attrType == AttrType.attrString) strCount1++;
+             }
+             short[] strSizes1 = new short[strCount1];
+             int strIdx1 = 0;
+             for (int i = 0; i < relDesc1.attrCnt; i++) {
+                 if (attrTypes1[i].attrType == AttrType.attrString) strSizes1[strIdx1++] = (short) attrDescs1[i].attrLen;
+             }
+
+             // Create a FileScan for the full outer relation
+             // Project all fields initially for the outer scan
+             FldSpec[] projOuter = new FldSpec[relDesc1.attrCnt];
+             for (int i = 0; i < relDesc1.attrCnt; i++) projOuter[i] = new FldSpec(new RelSpec(RelSpec.outer), i + 1);
+
+             FileScan outerScan = new FileScan(outerRelName, attrTypes1, strSizes1,
+                                              (short)relDesc1.attrCnt, (short)relDesc1.attrCnt,
+                                              projOuter, null);
+
+             outerResult = new OuterQueryResult(outerScan, attrTypes1, strSizes1, relDesc1.attrCnt);
+
+         } catch (NumberFormatException e) {
+             throw new Exception("Invalid OuterSpec for DJOIN: Must be Range(...), NN(...), or a column number (QA1).");
+         }
+    }
+
+    // --- Get Inner Relation Schema ---
     RelDesc relDesc2 = new RelDesc();
-    ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(relName1, relDesc1);
     ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(relName2, relDesc2);
-    
-    // Get attribute information for both relations
-    AttrDesc[] attrDescs1 = new AttrDesc[relDesc1.attrCnt];
     AttrDesc[] attrDescs2 = new AttrDesc[relDesc2.attrCnt];
-    for (int i = 0; i < relDesc1.attrCnt; i++) {
-        attrDescs1[i] = new AttrDesc();
-    }
-    for (int i = 0; i < relDesc2.attrCnt; i++) {
-        attrDescs2[i] = new AttrDesc();
-    }
-    ExtendedSystemDefs.MINIBASE_ATTRCAT.getRelInfo(relName1, relDesc1.attrCnt, attrDescs1);
+    for (int i = 0; i < relDesc2.attrCnt; i++) attrDescs2[i] = new AttrDesc();
     ExtendedSystemDefs.MINIBASE_ATTRCAT.getRelInfo(relName2, relDesc2.attrCnt, attrDescs2);
-    
-    // Verify both query attributes are vectors
-    if (queryAttr1 < 1 || queryAttr1 > relDesc1.attrCnt) {
-        throw new Exception("Invalid query attribute number for relation 1: " + queryAttr1);
-    }
-    if (queryAttr2 < 1 || queryAttr2 > relDesc2.attrCnt) {
-        throw new Exception("Invalid query attribute number for relation 2: " + queryAttr2);
-    }
-    
-    if (attrDescs1[queryAttr1-1].attrType.attrType != AttrType.attrVector100D) {
-        throw new Exception("Distance Join attribute for relation 1 must be a vector");
-    }
-    if (attrDescs2[queryAttr2-1].attrType.attrType != AttrType.attrVector100D) {
-        throw new Exception("Distance Join attribute for relation 2 must be a vector");
-    }
-    
-    // Setup query attributes for both relations
-    AttrType[] attrTypes1 = new AttrType[relDesc1.attrCnt];
+
     AttrType[] attrTypes2 = new AttrType[relDesc2.attrCnt];
-    int strCount1 = 0, strCount2 = 0;
-    
-    for (int i = 0; i < relDesc1.attrCnt; i++) {
-        attrTypes1[i] = attrDescs1[i].attrType;
-        if (attrTypes1[i].attrType == AttrType.attrString) {
-            strCount1++;
-        }
-    }
-    
+    int strCount2 = 0;
     for (int i = 0; i < relDesc2.attrCnt; i++) {
         attrTypes2[i] = attrDescs2[i].attrType;
-        if (attrTypes2[i].attrType == AttrType.attrString) {
-            strCount2++;
-        }
+        if (attrTypes2[i].attrType == AttrType.attrString) strCount2++;
     }
-    
-    // Create string sizes arrays
-    short[] strSizes1 = new short[strCount1];
     short[] strSizes2 = new short[strCount2];
-    int strIndex1 = 0, strIndex2 = 0;
-    
-    for (int i = 0; i < relDesc1.attrCnt; i++) {
-        if (attrTypes1[i].attrType == AttrType.attrString) {
-            strSizes1[strIndex1++] = (short) attrDescs1[i].attrLen;
-        }
-    }
-    
+    int strIdx2 = 0;
     for (int i = 0; i < relDesc2.attrCnt; i++) {
-        if (attrTypes2[i].attrType == AttrType.attrString) {
-            strSizes2[strIndex2++] = (short) attrDescs2[i].attrLen;
-        }
+        if (attrTypes2[i].attrType == AttrType.attrString) strSizes2[strIdx2++] = (short) attrDescs2[i].attrLen;
     }
-    
-    // Setup projection list
-    FldSpec[] projList;
-    int outFieldCount;
-    
-    if (outputFields == null) {
-        // Use all fields from both relations
-        outFieldCount = relDesc1.attrCnt + relDesc2.attrCnt;
-        projList = new FldSpec[outFieldCount];
-        
-        // Fields from outer relation (rel1)
-        for (int i = 0; i < relDesc1.attrCnt; i++) {
-            projList[i] = new FldSpec(new RelSpec(RelSpec.outer), i+1);
+
+    // --- Verify Join Attributes ---
+    if (queryAttr1 < 1 || queryAttr1 > outerResult.numAttrs || outerResult.attrTypes[queryAttr1-1].attrType != AttrType.attrVector100D) {
+        throw new Exception("Invalid vector attribute number QA1 ("+ queryAttr1 +") for outer relation " + outerRelName);
+    }
+    if (queryAttr2 < 1 || queryAttr2 > relDesc2.attrCnt || attrTypes2[queryAttr2-1].attrType != AttrType.attrVector100D) {
+        throw new Exception("Invalid vector attribute number QA2 ("+ queryAttr2 +") for inner relation " + relName2);
+    }
+
+    // --- Setup Projection List for Join Output ---
+    FldSpec[] projListJoin;
+    int outFldCnt;
+    AttrType[] jTypes; // Schema of the joined output tuple
+    short[] jStrSizes = null; // String sizes for the joined output
+
+    if (outputFieldsSpec == null) { // Project all fields
+        outFldCnt = outerResult.numAttrs + relDesc2.attrCnt;
+        projListJoin = new FldSpec[outFldCnt];
+        jTypes = new AttrType[outFldCnt];
+        List<Short> tempStrSizes = new ArrayList<>();
+        int k = 0;
+        int outerStrIdx = 0;
+        for (int i = 0; i < outerResult.numAttrs; i++) {
+            projListJoin[k] = new FldSpec(new RelSpec(RelSpec.outer), i + 1);
+            jTypes[k] = outerResult.attrTypes[i];
+            if (jTypes[k].attrType == AttrType.attrString) {
+                tempStrSizes.add(outerResult.strSizes[outerStrIdx++]);
+            }
+            k++;
         }
-        
-        // Fields from inner relation (rel2)
+        int innerStrIdx = 0;
         for (int i = 0; i < relDesc2.attrCnt; i++) {
-            projList[relDesc1.attrCnt + i] = new FldSpec(new RelSpec(RelSpec.innerRel), i+1);
-        }
-    } else {
-        // Parse field specifications with format O# or I# for outer/inner relation fields
-        List<FldSpec> projections = new ArrayList<>();
-        
-        for (String fieldSpec : outputFields) {
-            fieldSpec = fieldSpec.trim().toUpperCase();
-            
-            if (fieldSpec.length() < 2) {
-                throw new Exception("Invalid field specification: " + fieldSpec);
+            projListJoin[k] = new FldSpec(new RelSpec(RelSpec.innerRel), i + 1);
+            jTypes[k] = attrTypes2[i];
+             if (jTypes[k].attrType == AttrType.attrString) {
+                tempStrSizes.add(strSizes2[innerStrIdx++]);
             }
-            
+            k++;
+        }
+        jStrSizes = tempStrSizes.stream().mapToInt(s -> s).collect(() -> new short[tempStrSizes.size()], (arr, val) -> arr[arr.length - tempStrSizes.indexOf((short)val)] = (short)val, (arr1, arr2) -> {}); // Convert List<Short> to short[] - simplified logic needed here
+         // Correct conversion from List<Short> to short[]
+         jStrSizes = new short[tempStrSizes.size()];
+         for(int i=0; i<tempStrSizes.size(); i++) jStrSizes[i] = tempStrSizes.get(i);
+
+
+    } else { // Project specified fields (O#/I#)
+        outFldCnt = outputFieldsSpec.length;
+        projListJoin = new FldSpec[outFldCnt];
+        jTypes = new AttrType[outFldCnt];
+        List<Short> tempStrSizes = new ArrayList<>();
+        int outerStrIdx = 0;
+        int innerStrIdx = 0;
+
+        for (int i = 0; i < outFldCnt; i++) {
+            String fieldSpec = outputFieldsSpec[i].trim().toUpperCase();
+            if (fieldSpec.length() < 2) throw new Exception("Invalid field spec: " + fieldSpec);
             char relType = fieldSpec.charAt(0);
-            int fieldNum;
-            
-            try {
-                fieldNum = Integer.parseInt(fieldSpec.substring(1));
-            } catch (NumberFormatException e) {
-                throw new Exception("Invalid field number in: " + fieldSpec);
-            }
-            
+            int fieldNum = Integer.parseInt(fieldSpec.substring(1));
+
             if (relType == 'O') {
-                // Outer relation field
-                if (fieldNum < 1 || fieldNum > relDesc1.attrCnt) {
-                    throw new Exception("Invalid field number for outer relation: " + fieldNum);
+                if (fieldNum < 1 || fieldNum > outerResult.numAttrs) throw new Exception("Invalid outer field num: " + fieldNum);
+                projListJoin[i] = new FldSpec(new RelSpec(RelSpec.outer), fieldNum);
+                jTypes[i] = outerResult.attrTypes[fieldNum - 1];
+                if (jTypes[i].attrType == AttrType.attrString) {
+                    // Find the correct string size from the original outer schema
+                    int currentOuterStr = 0;
+                    for(int outerAttr=0; outerAttr<fieldNum-1; outerAttr++){
+                        if(outerResult.attrTypes[outerAttr].attrType == AttrType.attrString) currentOuterStr++;
+                    }
+                    tempStrSizes.add(outerResult.strSizes[currentOuterStr]);
                 }
-                projections.add(new FldSpec(new RelSpec(RelSpec.outer), fieldNum));
             } else if (relType == 'I') {
-                // Inner relation field
-                if (fieldNum < 1 || fieldNum > relDesc2.attrCnt) {
-                    throw new Exception("Invalid field number for inner relation: " + fieldNum);
+                if (fieldNum < 1 || fieldNum > relDesc2.attrCnt) throw new Exception("Invalid inner field num: " + fieldNum);
+                projListJoin[i] = new FldSpec(new RelSpec(RelSpec.innerRel), fieldNum);
+                jTypes[i] = attrTypes2[fieldNum - 1];
+                 if (jTypes[i].attrType == AttrType.attrString) {
+                     // Find the correct string size from the original inner schema
+                    int currentInnerStr = 0;
+                    for(int innerAttr=0; innerAttr<fieldNum-1; innerAttr++){
+                        if(attrTypes2[innerAttr].attrType == AttrType.attrString) currentInnerStr++;
+                    }
+                    tempStrSizes.add(strSizes2[currentInnerStr]);
                 }
-                projections.add(new FldSpec(new RelSpec(RelSpec.innerRel), fieldNum));
             } else {
-                throw new Exception("Invalid relation specifier: " + relType + ". Must be 'O' or 'I'");
+                throw new Exception("Invalid relation specifier '" + relType + "' in output fields.");
             }
         }
-        
-        outFieldCount = projections.size();
-        if (outFieldCount == 0) {
-            throw new Exception("No valid output fields specified");
-        }
-        projList = projections.toArray(new FldSpec[outFieldCount]);
+         // Correct conversion from List<Short> to short[]
+         jStrSizes = new short[tempStrSizes.size()];
+         for(int i=0; i<tempStrSizes.size(); i++) jStrSizes[i] = tempStrSizes.get(i);
     }
-    
-    // Create outer relation scan
-    FileScan outerScan = new FileScan(relName1, attrTypes1, strSizes1,
-                                     (short)relDesc1.attrCnt, (short)relDesc1.attrCnt,
-                                     null, null);
-    
-    // Determine if we should use index
-    boolean useIndex = indexOption.equalsIgnoreCase("H");
-    
-    // Create join conditions for vector distance join
-    CondExpr[] joinExpr = new CondExpr[2]; // One for condition, one for null terminator
+    if (outFldCnt == 0) throw new Exception("No output fields specified for DJOIN.");
+
+
+    // --- Create Join Condition ---
+    CondExpr[] joinExpr = new CondExpr[2];
     joinExpr[0] = new CondExpr();
-    joinExpr[0].op = new AttrOperator(AttrOperator.aopVECTORDIST);
+    joinExpr[0].op = new AttrOperator(AttrOperator.aopVECTORDIST); // Use vector distance operator
     joinExpr[0].type1 = new AttrType(AttrType.attrSymbol);
-    joinExpr[0].operand1.symbol = new FldSpec(new RelSpec(RelSpec.outer), queryAttr1);
+    joinExpr[0].operand1.symbol = new FldSpec(new RelSpec(RelSpec.outer), queryAttr1); // QA1 from outer
     joinExpr[0].type2 = new AttrType(AttrType.attrSymbol);
-    joinExpr[0].operand2.symbol = new FldSpec(new RelSpec(RelSpec.innerRel), queryAttr2);
-    joinExpr[0].distance = distance;
-    joinExpr[1] = null; // End of expression list
-    
-    iterator.Iterator join = null;
-    String indexName = null;
-    
-    try {
-        // If using index, try to find a suitable LSH index for relation 2
-        if (useIndex) {
-            boolean indexFound = false;
-            int indexCount = relDesc2.indexCnt;
-            
-            if (indexCount > 0) {
-                IndexDesc[] indexDescs = new IndexDesc[indexCount];
-                for (int i = 0; i < indexCount; i++) {
-                    indexDescs[i] = new IndexDesc();
-                }
-                
-                ExtendedSystemDefs.MINIBASE_INDCAT.getRelInfo(relName2, indexCount, indexDescs);
-                
-                // Find a suitable LSH index for the vector attribute in relation 2
-                for (int i = 0; i < indexCount; i++) {
-                    // Find the attribute position for this index
-                    int indexAttrPos = -1;
-                    for (int j = 0; j < relDesc2.attrCnt; j++) {
-                        if (attrDescs2[j].attrName.equals(indexDescs[i].attrName)) {
-                            indexAttrPos = j + 1; // Convert to 1-based
-                            break;
-                        }
-                    }
-                    
-                    // If this index matches our query attribute and is an LSH index
-                    if (indexAttrPos == queryAttr2 && 
-                        indexDescs[i].accessType.indexType == IndexType.LSHFIndex) {
-                        
-                        // Find the actual LSH file
-                        File dir = new File(".");
-                        String prefix = relName2 + queryAttr2 + "_L";
-                        File[] matchingFiles = dir.listFiles((d, name) -> 
-                            name.startsWith(prefix) && name.endsWith(".ser"));
-                        
-                        if (matchingFiles != null && matchingFiles.length > 0) {
-                            indexName = matchingFiles[0].getName();
-                            indexFound = true;
-                            System.out.println("Using LSH index for Distance Join: " + indexName);
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            if (!indexFound) {
-                System.out.println("No suitable LSH index found for relation 2, using nested loop join");
-                useIndex = false;
-            }
+    joinExpr[0].operand2.symbol = new FldSpec(new RelSpec(RelSpec.innerRel), queryAttr2); // QA2 from inner
+    joinExpr[0].distance = distanceThreshold; // The distance threshold D
+    joinExpr[1] = null;
+
+    // --- Determine Inner Index Usage ---
+    boolean useInnerIndex = indexOptionInner.equalsIgnoreCase("H");
+    String innerIndexName = null;
+    if (useInnerIndex) {
+        innerIndexName = findLSHIndex(relName2, queryAttr2, relDesc2, attrDescs2);
+        if (innerIndexName != null) {
+            System.out.println("Using LSH index for inner relation (" + relName2 + "): " + innerIndexName);
+        } else {
+            System.out.println("No suitable LSH index found for inner relation (" + relName2 + "), using nested loop join.");
+            useInnerIndex = false;
         }
-        
-        // Create appropriate join operator
-        if (useIndex && indexName != null) {
-            // Create an INLJoins using the LSH index
-            join = new INLJoins(
-                attrTypes1, relDesc1.attrCnt, strSizes1,
+    }
+
+    // --- Create Join Iterator ---
+    iterator.Iterator joinIterator = null;
+    try {
+        if (useInnerIndex && innerIndexName != null) {
+             System.out.println("Using Index Nested Loop Join (INLJ)");
+            joinIterator = new INLJoins(
+                outerResult.attrTypes, outerResult.numAttrs, outerResult.strSizes,
                 attrTypes2, relDesc2.attrCnt, strSizes2,
-                10, // Memory buffer pages
-                outerScan,
+                bufferPages, // Use bufferPages
+                outerResult.iterator, // The iterator from the outer query (Range/NN/FileScan)
                 relName2,
                 new IndexType(IndexType.LSHFIndex),
-                indexName,
+                innerIndexName,
                 joinExpr,
-                null, // No additional right filter
-                projList,
-                outFieldCount
+                null, // Right filter expression (none here)
+                projListJoin,
+                outFldCnt
             );
         } else {
-            // Use nested loop join without index
-            join = new NestedLoopsJoins(
-                attrTypes1, relDesc1.attrCnt, strSizes1,
+             System.out.println("Using Nested Loop Join (NLJ)");
+            joinIterator = new NestedLoopsJoins(
+                outerResult.attrTypes, outerResult.numAttrs, outerResult.strSizes,
                 attrTypes2, relDesc2.attrCnt, strSizes2,
-                10, // Memory buffer pages
-                outerScan,
+                bufferPages, // Use bufferPages
+                outerResult.iterator, // The iterator from the outer query
                 relName2,
                 joinExpr,
-                null, // No right filter
-                projList,
-                outFieldCount
+                null, // Right filter expression
+                projListJoin,
+                outFldCnt
             );
         }
-        
-        // Create combined output attribute type array
-        AttrType[] jTypes = new AttrType[outFieldCount];
-        
-        for (int i = 0; i < outFieldCount; i++) {
-            if (projList[i].relation.key == RelSpec.outer) {
-                jTypes[i] = attrTypes1[projList[i].offset - 1];
-            } else {
-                jTypes[i] = attrTypes2[projList[i].offset - 1];
-            }
-        }
-        
-        // Process and display results
-        System.out.println("Distance Join results (max distance: " + distance + "):");
+
+        // --- Process and Print Results ---
+        System.out.println("DJOIN results (max distance: " + distanceThreshold + "):");
         System.out.println("---------------------------------------------");
-        System.out.println("Tuple");
-        System.out.println("---------------------------------------------");
-        
-        // Retrieve and display joined tuples
-        Tuple tuple;
+
+        Tuple outputTuple = new Tuple(); // Create a tuple object to be reused
+        outputTuple.setHdr((short) outFldCnt, jTypes, jStrSizes); // Set header once
+
         int resultCount = 0;
-        
-        while ((tuple = join.get_next()) != null) {
-            System.out.println(tupleToString(tuple, projList, jTypes));
-            resultCount++;
+        try {
+            while ((outputTuple = joinIterator.get_next()) != null) {
+                // The tuple returned by the join should already be projected.
+                // Header is already set if the join operator correctly populates the tuple.
+                // We might need to ensure the tuple object passed to get_next allows modification,
+                // or create a new one each time if necessary. Assuming get_next returns a valid tuple.
+                System.out.println(tupleToString(outputTuple, projListJoin, jTypes)); // Use jTypes here
+                resultCount++;
+            }
+        } catch (Exception e) {
+            System.err.println("Error getting next join result: " + e.getMessage());
+            e.printStackTrace();
         }
-        
+
         System.out.println("---------------------------------------------");
-        System.out.println("Total records found: " + resultCount);
+        System.out.println("Total joined records found: " + resultCount);
+
     } finally {
-        // Close the join operator
-        if (join != null) {
-            join.close();
-        } else if (outerScan != null) {
-            // If join wasn't created, still need to close the outer scan
-            outerScan.close();
+        // --- Close the Join Iterator ---
+        // This will also close the underlying outer iterator (Range/NN/FileScan)
+        if (joinIterator != null) {
+            joinIterator.close();
         }
     }
 }
+
+
+/**
+ * Helper method to create the outer iterator and get its schema for DJOIN.
+ *
+ * @param outerQueryExpr The full query expression for the outer part (Range or NN)
+ * @param baseRelName The name of the base relation being queried
+ * @param bufferPages The number of buffer pages allocated for this query
+ * @return OuterQueryResult containing the iterator and schema info
+ * @throws Exception if there's an error setting up the outer query
+ */
+private static OuterQueryResult getOuterIteratorAndSchema(String outerQueryExpr, String baseRelName, int bufferPages) throws Exception {
+    System.out.println("Executing outer query: " + outerQueryExpr);
+
+    // Get relation information
+    RelDesc relDesc = new RelDesc();
+    ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(baseRelName, relDesc);
+
+    // Get attribute information
+    AttrDesc[] attrDescs = new AttrDesc[relDesc.attrCnt];
+    for (int i = 0; i < relDesc.attrCnt; i++) {
+        attrDescs[i] = new AttrDesc();
+    }
+    ExtendedSystemDefs.MINIBASE_ATTRCAT.getRelInfo(baseRelName, relDesc.attrCnt, attrDescs);
+
+    // Setup query attributes
+    AttrType[] attrTypes = new AttrType[relDesc.attrCnt];
+    int strCount = 0;
+    for (int i = 0; i < relDesc.attrCnt; i++) {
+        attrTypes[i] = attrDescs[i].attrType;
+        if (attrTypes[i].attrType == AttrType.attrString) {
+            strCount++;
+        }
+    }
+    short[] strSizes = new short[strCount];
+    int strIndex = 0;
+    for (int i = 0; i < relDesc.attrCnt; i++) {
+        if (attrTypes[i].attrType == AttrType.attrString) {
+            strSizes[strIndex++] = (short) attrDescs[i].attrLen;
+        }
+    }
+
+    // Setup projection - for the outer query used in a join, we need all fields
+    FldSpec[] projlist = new FldSpec[relDesc.attrCnt];
+    for (int i = 0; i < relDesc.attrCnt; i++) {
+        projlist[i] = new FldSpec(new RelSpec(RelSpec.outer), i + 1);
+    }
+    int projCount = relDesc.attrCnt;
+
+
+    iterator.Iterator scan = null;
+    String[] params = parseQueryParams(outerQueryExpr);
+
+    if (outerQueryExpr.startsWith("Range(")) {
+        if (params.length < 4) throw new Exception("Outer Range query requires at least 4 parameters");
+        int queryAttrNum = Integer.parseInt(params[0].trim());
+        String targetVectorFile = params[1].trim(); // T1 is the target vector file
+        int rangeDistance = Integer.parseInt(params[2].trim());
+        String indexOption = params[3].trim();
+
+        if (queryAttrNum < 1 || queryAttrNum > relDesc.attrCnt || attrTypes[queryAttrNum-1].attrType != AttrType.attrVector100D) {
+             throw new Exception("Invalid vector attribute number for outer Range query: " + queryAttrNum);
+        }
+        int[] targetVector = readVectorFromFile(targetVectorFile);
+        Vector100Dtype targetVec = new Vector100Dtype(targetVector);
+
+        boolean useIndex = indexOption.equalsIgnoreCase("H");
+        boolean indexFound = false;
+        String indexName = null;
+
+        if (useIndex) {
+            indexName = findLSHIndex(baseRelName, queryAttrNum, relDesc, attrDescs);
+            if (indexName != null) {
+                System.out.println("Using LSH index for outer Range query: " + indexName);
+                scan = new RSIndexScan(new IndexType(IndexType.LSHFIndex), baseRelName, indexName,
+                                       attrTypes, strSizes, (short)relDesc.attrCnt, (short)projCount, projlist,
+                                       null, queryAttrNum, targetVec, rangeDistance);
+                indexFound = true;
+            } else {
+                 System.out.println("No suitable LSH index found for outer Range query, using sequential scan with filter");
+            }
+        }
+        if (!indexFound) {
+             // Need to apply range filter manually using FileScan + Filter logic
+             // This requires a CondExpr for distance.
+             CondExpr[] expr = new CondExpr[2];
+             expr[0] = new CondExpr();
+             expr[0].op = new AttrOperator(AttrOperator.aopVECTORDIST);
+             expr[0].type1 = new AttrType(AttrType.attrSymbol);
+             expr[0].operand1.symbol = new FldSpec(new RelSpec(RelSpec.outer), queryAttrNum);
+             expr[0].type2 = new AttrType(AttrType.attrVector100D); // Literal vector
+             expr[0].operand2.vector = targetVec; // Store the target vector directly
+             expr[0].distance = rangeDistance; // Use distance for comparison (<= D)
+             expr[1] = null;
+
+             // FileScan will apply the filter
+             scan = new FileScan(baseRelName, attrTypes, strSizes, (short) relDesc.attrCnt, (short) projCount, projlist, expr);
+        }
+
+    } else if (outerQueryExpr.startsWith("NN(")) {
+        if (params.length < 4) throw new Exception("Outer NN query requires at least 4 parameters");
+        int queryAttrNum = Integer.parseInt(params[0].trim());
+        String targetVectorFile = params[1].trim(); // T1 is the target vector file
+        int k = Integer.parseInt(params[2].trim());
+        String indexOption = params[3].trim();
+
+         if (queryAttrNum < 1 || queryAttrNum > relDesc.attrCnt || attrTypes[queryAttrNum-1].attrType != AttrType.attrVector100D) {
+             throw new Exception("Invalid vector attribute number for outer NN query: " + queryAttrNum);
+        }
+        int[] targetVector = readVectorFromFile(targetVectorFile);
+        Vector100Dtype targetVec = new Vector100Dtype(targetVector);
+
+        boolean useIndex = indexOption.equalsIgnoreCase("H");
+        boolean indexFound = false;
+        String indexName = null;
+
+        if (useIndex) {
+            indexName = findLSHIndex(baseRelName, queryAttrNum, relDesc, attrDescs);
+            if (indexName != null) {
+                System.out.println("Using LSH index for outer NN query: " + indexName);
+                scan = new NNIndexScan(new IndexType(IndexType.LSHFIndex), baseRelName, indexName,
+                                       attrTypes, strSizes, (short)relDesc.attrCnt, (short)projCount, projlist,
+                                       null, queryAttrNum, targetVec, k);
+                indexFound = true;
+            } else {
+                 System.out.println("No suitable LSH index found for outer NN query, using sequential scan");
+            }
+        }
+         if (!indexFound) {
+             // NN without index requires sorting. For DJOIN, we need the stream.
+             // We'll use FileScan and rely on the join operator to handle iteration.
+             // A full NN sort here would be inefficient.
+             System.out.println("Using sequential scan for outer NN query (results not pre-sorted/limited by K)");
+             scan = new FileScan(baseRelName, attrTypes, strSizes, (short) relDesc.attrCnt, (short) projCount, projlist, null);
+         }
+
+    } else {
+        throw new Exception("Unsupported outer query type for DJOIN: " + outerQueryExpr);
+    }
+
+    // Return the iterator and the full schema of the base relation
+    return new OuterQueryResult(scan, attrTypes, strSizes, relDesc.attrCnt);
+}
+
+/**
+ * Helper to find a suitable LSH index file name.
+ */
+private static String findLSHIndex(String relName, int queryAttrNum, RelDesc relDesc, AttrDesc[] attrDescs) {
+     int indexCount = relDesc.indexCnt;
+     if (indexCount > 0) {
+         IndexDesc[] indexDescs = new IndexDesc[indexCount];
+         for (int i = 0; i < indexCount; i++) indexDescs[i] = new IndexDesc();
+         try {
+             ExtendedSystemDefs.MINIBASE_INDCAT.getRelInfo(relName, indexCount, indexDescs);
+             for (int i = 0; i < indexCount; i++) {
+                 int indexAttrPos = -1;
+                 for (int j = 0; j < relDesc.attrCnt; j++) {
+                     if (attrDescs[j].attrName.equals(indexDescs[i].attrName)) {
+                         indexAttrPos = j + 1; break;
+                     }
+                 }
+                 if (indexAttrPos == queryAttrNum && indexDescs[i].accessType.indexType == IndexType.LSHFIndex) {
+                     // Find the actual .ser file based on naming convention
+                     File dir = new File(".");
+                     String prefix = relName + queryAttrNum + "_L";
+                     File[] matchingFiles = dir.listFiles((d, name) -> name.startsWith(prefix) && name.endsWith(".ser"));
+                     if (matchingFiles != null && matchingFiles.length > 0) {
+                         return matchingFiles[0].getName(); // Return first match
+                     }
+                 }
+             }
+         } catch (Exception e) {
+             System.err.println("Warning: Error accessing index info for " + relName + ": " + e.getMessage());
+         }
+     }
+     return null; // No suitable index found
+}
+
+
     
 }

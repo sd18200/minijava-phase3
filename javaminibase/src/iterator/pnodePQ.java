@@ -30,6 +30,14 @@ public abstract class pnodePQ
    */
   public pnodePQ() { count = 0; } 
 
+  public pnodePQ(int fldNo, AttrType fldType, TupleOrder order) {
+    count = 0;
+    fld_no = fldNo;
+    fld_type = fldType;
+    sort_order = order;
+}
+
+
   /**
    * returns the number of elements in the tree.
    * @return number of elements in the tree.

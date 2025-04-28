@@ -147,6 +147,13 @@ public class OBuf implements GlobalConst{
   private  int  TEST_temp_fd;                        // fd of a temporary file
   private  Heapfile _temp_fd;
   private  boolean buffer_only;
+
+
+  public int GetNumOfTuples() {
+    return t_wr_to_buf;
+}
+
+
 }
 
 
