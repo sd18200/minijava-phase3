@@ -28,6 +28,13 @@ public class DB implements GlobalConst {
 	   DiskMgrException {
     
     name = fname;
+
+    File dbFile = new File(fname);
+    if (!dbFile.exists()) {
+        // Throw an exception that the caller (DBInterface) expects when the file is missing.
+        // FileNotFoundException is a standard and appropriate choice.
+        throw new FileNotFoundException("Database file not found: " + fname);
+    }
     
     // Creaat a random access file
     fp = new RandomAccessFile(fname, "rw");
@@ -66,44 +73,66 @@ public class DB implements GlobalConst {
    * @exception DiskMgrException error caused by other layers
    */
   public void openDB( String fname, int num_pgs)
-    throws IOException, 
-	   InvalidPageNumberException,
-	   FileIOException,
-	   DiskMgrException {
-    
+    throws IOException,
+           InvalidPageNumberException,
+           FileIOException,
+           DiskMgrException {
+
     name = new String(fname);
+    // Ensure at least 2 pages (header + space map)
     num_pages = (num_pgs > 2) ? num_pgs : 2;
-    
+
     File DBfile = new File(name);
-    
-    DBfile.delete();
-    
-    // Creaat a random access file
-    fp = new RandomAccessFile(fname, "rw");
-    
+    // Log the absolute path it will try to use
+    System.out.println("DEBUG: DB.openDB(create) - Target file path: " + DBfile.getAbsolutePath());
+
+    // Delete the file if it already exists to ensure a fresh start
+    // Note: This doesn't throw an error if the file doesn't exist.
+    //DBfile.delete();
+
+    // Create a random access file. "rw" mode creates the file if it doesn't exist.
+    try {
+        System.out.println("DEBUG: DB.openDB(create) - Attempting to create RandomAccessFile...");
+        fp = new RandomAccessFile(fname, "rw");
+        System.out.println("DEBUG: DB.openDB(create) - RandomAccessFile created successfully.");
+    } catch (IOException e) {
+        // Log failure details if RandomAccessFile creation fails (e.g., permissions)
+        System.err.println("DEBUG: DB.openDB(create) - FAILED to create RandomAccessFile for: " + DBfile.getAbsolutePath());
+        throw e; // Re-throw the original exception
+    }
+
     // Make the file num_pages pages long, filled with zeroes.
-    fp.seek((long)(num_pages*MINIBASE_PAGESIZE-1));
+    // Seek to the last byte of the last page and write a zero.
+    fp.seek((long)num_pages*MINIBASE_PAGESIZE -1);
     fp.writeByte(0);
-    
+
     // Initialize space map and directory pages.
-    
-    // Initialize the first DB page
-    Page apage = new Page();
+
+    // Initialize the first DB page (Page 0 - Header/Directory)
     PageId pageId = new PageId();
     pageId.pid = 0;
-    pinPage(pageId, apage, true /*no diskIO*/);
-    
+    Page apage = new Page();
+    // Pin the page, marking it as empty (true) since we are initializing it, not reading existing content.
+    pinPage(pageId, apage, true /*emptyPage*/);
+
+    // Treat the pinned page as the first page structure
     DBFirstPage firstpg = new DBFirstPage(apage);
-    
+
+    // Write the total number of pages into the header
     firstpg.setNumDBPages(num_pages);
+
+    // Unpin the first page, marking it as dirty (true) so changes are written back.
     unpinPage(pageId, true /*dirty*/);
-    
-    // Calculate how many pages are needed for the space map.  Reserve pages
-    // 0 and 1 and as many additional pages for the space map as are needed.
+
+    // Calculate how many pages are needed for the space map.
+    // The space map requires 1 bit per page of the database.
+    // Reserve pages 0 (header) and 1 onwards for the space map.
     int num_map_pages = (num_pages + bits_per_page -1)/bits_per_page;
-    
-    set_bits(pageId, 1+num_map_pages, 1);
-    
+
+    // Mark the header page (0) and all space map pages (1 to num_map_pages) as allocated (bit = 1)
+    // The run starts at page 0 and has a size of 1 (header) + num_map_pages.
+    set_bits(new PageId(0), 1 + num_map_pages, 1); // Pass PageId(0) as start, and bit value 1
+
   }
   
   /** Close DB file.
@@ -566,72 +595,107 @@ public class DB implements GlobalConst {
    */
   public PageId get_file_entry(String name)
     throws IOException,
-	   FileIOException,
-	   InvalidPageNumberException, 
-	   DiskMgrException {
+       FileIOException,
+       InvalidPageNumberException,
+       DiskMgrException {
 
+    System.out.println("DEBUG: DB.get_file_entry - Entered for name: " + name); // Add log
     Page apage = new Page();
     boolean found = false;
-    int slot = 0;
+    // int slot = 0; // Slot is not needed outside the loop anymore
     PageId hpid = new PageId();
     PageId nexthpid = new PageId(0);
-    DBHeaderPage dp;
-    
-    do
-      {// Start DO01
-	
-	// System.out.println("get_file_entry do-loop01: "+name);
-        hpid.pid = nexthpid.pid;
-	
-        // Pin the header page.
-        pinPage(hpid, apage, false /*no diskIO*/);
-	
-	// This complication is because the first page has a different
-        // structure from that of subsequent pages.
-	if(hpid.pid==0)
-	  {
-	    dp = new DBFirstPage();
-	    ((DBFirstPage) dp).openPage(apage);
-	  }
-	else
-	  {
-	    dp = new DBDirectoryPage();
-	    ((DBDirectoryPage) dp).openPage(apage);
-	  }
-	nexthpid = dp.getNextPage();
-	
-	int entry = 0;
-	PageId tmppid = new PageId();
-	String tmpname;
-	
-	while(entry < dp.getNumOfEntries())
-	  {
-	    tmpname = dp.getFileEntry(tmppid, entry);
-	    
-	    if((tmppid.pid != INVALID_PAGE)&&
-	       (tmpname.compareTo(name) == 0)) break; 
-	    entry ++;
-	  }
-	if(entry < dp.getNumOfEntries())
-	  {
-	    slot =  entry;
-	    found = true;
-	  }
-	
-	unpinPage(hpid, false /*undirty*/);
-	
-      }while((nexthpid.pid!=INVALID_PAGE)&&(!found));// End of DO01
-    
-    if(!found)  // Entry not found - don't post error, just fail.
-      {    
-	//  System.out.println("entry NOT found");
-	return null;
-      }
-    
-    PageId startpid = new PageId();
-    dp.getFileEntry(startpid, slot);
-    return startpid;
-  }
+    DBHeaderPage dp = null; // Initialize dp
+    PageId startpid = null; // Initialize startpid to null, will hold the result if found
+
+    try { // Wrap in try-catch for detailed error reporting within this method
+        do
+        {// Start DO01
+            hpid.pid = nexthpid.pid;
+            System.out.println("DEBUG: DB.get_file_entry - Loop start, hpid: " + hpid.pid); // Add log
+
+            System.out.println("DEBUG: DB.get_file_entry - About to pin page: " + hpid.pid); // Add log
+            pinPage(hpid, apage, false /*no diskIO*/);
+            System.out.println("DEBUG: DB.get_file_entry - Pinned page: " + hpid.pid); // Add log
+
+            // This complication is because the first page has a different
+            // structure from that of subsequent pages.
+            if(hpid.pid==0)
+            {
+                // System.out.println("DEBUG: DB.get_file_entry - Opening as DBFirstPage"); // Optional log
+                dp = new DBFirstPage();
+                ((DBFirstPage) dp).openPage(apage);
+            }
+            else
+            {
+                // System.out.println("DEBUG: DB.get_file_entry - Opening as DBDirectoryPage"); // Optional log
+                dp = new DBDirectoryPage();
+                ((DBDirectoryPage) dp).openPage(apage);
+            }
+            // Get the ID of the *next* header page early for the loop condition
+            System.out.println("DEBUG: DB.get_file_entry - About to get next page ID from page: " + hpid.pid); // Add log
+            nexthpid = dp.getNextPage();
+            System.out.println("DEBUG: DB.get_file_entry - Got next page ID: " + nexthpid.pid); // Add log
+
+            int entry = 0;
+            PageId tmppid = new PageId(); // Temporary PageId for reading entries
+            String tmpname;
+            int numEntries = dp.getNumOfEntries(); // Get num entries once
+            System.out.println("DEBUG: DB.get_file_entry - Num entries on page " + hpid.pid + ": " + numEntries); // Add log
+
+            // Loop through entries on the current page
+            while(entry < numEntries) // Use cached numEntries
+            {
+                // System.out.println("DEBUG: DB.get_file_entry - Checking entry: " + entry); // Optional: very verbose log
+                tmpname = dp.getFileEntry(tmppid, entry);
+
+                if((tmppid.pid != INVALID_PAGE) && (tmpname != null) && // Add null check
+                   (tmpname.compareTo(name) == 0)) {
+                     System.out.println("DEBUG: DB.get_file_entry - Found entry '" + name + "' at slot " + entry + " on page " + hpid.pid); // Add log
+                     startpid = new PageId(); // Create PageId to store the result
+                     // *** FIX: Get the start page ID *while the page is pinned* ***
+                     dp.getFileEntry(startpid, entry);
+                     System.out.println("DEBUG: DB.get_file_entry - Retrieved startpid: " + startpid.pid); // Add log
+                     found = true;
+                     break; // Exit inner loop, we found what we needed
+                }
+                entry ++;
+            } // End inner while
+
+            // Unpin the current page *after* we are done processing it
+            System.out.println("DEBUG: DB.get_file_entry - About to unpin page: " + hpid.pid); // Add log
+            unpinPage(hpid, false /*undirty*/);
+            System.out.println("DEBUG: DB.get_file_entry - Unpinned page: " + hpid.pid); // Add log
+
+            // If we found the entry on this page, no need to check further pages
+            if (found) {
+                System.out.println("DEBUG: DB.get_file_entry - Breaking outer loop as entry found."); // Add log
+                break; // Exit the outer do-while loop
+            }
+             System.out.println("DEBUG: DB.get_file_entry - Loop end, continuing to next page: " + nexthpid.pid); // Add log
+
+        // Continue if there's a next header page AND we haven't found the entry yet
+        } while(nexthpid.pid != INVALID_PAGE);
+
+        // If found, startpid was populated correctly while the page was pinned.
+        // If not found, startpid remains null.
+        if (found) {
+             System.out.println("DEBUG: DB.get_file_entry - Returning found pid: " + startpid.pid); // Add log
+        } else {
+             System.out.println("DEBUG: DB.get_file_entry - Returning null (entry not found)"); // Add log
+        }
+        return startpid;
+    } catch (Exception e) { // Catch unexpected exceptions within this method's logic
+        System.err.println("DEBUG: DB.get_file_entry - *** UNEXPECTED EXCEPTION *** inside DB.get_file_entry for page " + hpid.pid + ": " + e); // Add error log
+        e.printStackTrace(); // Print stack trace to standard error
+        // Re-throw the original type if possible, or a generic one to satisfy the method signature
+        if (e instanceof IOException) throw (IOException)e;
+        if (e instanceof FileIOException) throw (FileIOException)e;
+        if (e instanceof InvalidPageNumberException) throw (InvalidPageNumberException)e;
+        if (e instanceof DiskMgrException) throw (DiskMgrException)e;
+        throw new DiskMgrException(e, "DB.java: get_file_entry() failed unexpectedly within loop"); // Fallback re-throw
+    }
+}
   
   /** Functions to return some characteristics of the database.
    */

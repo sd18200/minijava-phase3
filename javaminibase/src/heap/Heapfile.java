@@ -213,83 +213,113 @@ public class Heapfile implements Filetype,  GlobalConst {
    * @exception HFDiskMgrException exception thrown from diskmgr layer
    * @exception IOException I/O errors
    */
-  public  Heapfile(String name) 
-    throws HFException, 
-	   HFBufMgrException,
-	   HFDiskMgrException,
-	   IOException
-	   
-    {
-      // Give us a prayer of destructing cleanly if construction fails.
-      _file_deleted = true;
-      _fileName = null;
-      
-      if(name == null) 
-	{
-	  // If the name is NULL, allocate a temporary name
-	  // and no logging is required.
-	  _fileName = "tempHeapFile";
-	  String useId = new String("user.name");
-	  String userAccName;
-	  userAccName = System.getProperty(useId);
-	  _fileName = _fileName + userAccName;
-	  
-	  String filenum = Integer.toString(tempfilecount);
-	  _fileName = _fileName + filenum; 
-	  _ftype = TEMP;
-	  tempfilecount ++;
-	  
-	}
-      else
-	{
-	  _fileName = name;
-	  _ftype = ORDINARY;    
-	}
-      
-      // The constructor gets run in two different cases.
-      // In the first case, the file is new and the header page
-      // must be initialized.  This case is detected via a failure
-      // in the db->get_file_entry() call.  In the second case, the
-      // file already exists and all that must be done is to fetch
-      // the header page into the buffer pool
-      
-      // try to open the file
-      
-      Page apage = new Page();
-      _firstDirPageId = null;
-      if (_ftype == ORDINARY)
-	_firstDirPageId = get_file_entry(_fileName);
-      
-      if(_firstDirPageId==null)
-	{
-	  // file doesn't exist. First create it.
-	  _firstDirPageId = newPage(apage, 1);
-	  // check error
-	  if(_firstDirPageId == null)
-	    throw new HFException(null, "can't new page");
-	  
-	  add_file_entry(_fileName, _firstDirPageId);
-	  // check error(new exception: Could not add file entry
-	  
-	  HFPage firstDirPage = new HFPage();
-	  firstDirPage.init(_firstDirPageId, apage);
-	  PageId pageId = new PageId(INVALID_PAGE);
-	  
-	  firstDirPage.setNextPage(pageId);
-	  firstDirPage.setPrevPage(pageId);
-	  unpinPage(_firstDirPageId, true /*dirty*/ );
-	  
-	  
-	}
-      _file_deleted = false;
-      // ASSERTIONS:
-      // - ALL private data members of class Heapfile are valid:
-      //
-      //  - _firstDirPageId valid
-      //  - _fileName valid
-      //  - no datapage pinned yet    
-      
-    } // end of constructor 
+  public Heapfile(String name) 
+  throws HFException, 
+       HFBufMgrException,
+       HFDiskMgrException,
+       IOException
+{
+  System.out.println("DEBUG: Heapfile constructor started for: " + name);
+  System.out.println("DEBUG: Current time: " + System.currentTimeMillis());
+  
+  // Give us a prayer of destructing cleanly if construction fails.
+  _file_deleted = true;
+  _fileName = null;
+  
+  if(name == null) 
+  {
+    // If the name is NULL, allocate a temporary name
+    // and no logging is required.
+    _fileName = "tempHeapFile";
+    String useId = new String("user.name");
+    String userAccName;
+    userAccName = System.getProperty(useId);
+    _fileName = _fileName + userAccName;
+    
+    String filenum = Integer.toString(tempfilecount);
+    _fileName = _fileName + filenum; 
+    _ftype = TEMP;
+    tempfilecount++;
+    System.out.println("DEBUG: Created temporary file name: " + _fileName);
+  }
+  else
+  {
+    _fileName = name;
+    _ftype = ORDINARY;    
+    System.out.println("DEBUG: Using provided file name: " + _fileName);
+  }
+  
+  // The constructor gets run in two different cases.
+  // In the first case, the file is new and the header page
+  // must be initialized.  This case is detected via a failure
+  // in the db->get_file_entry() call.  In the second case, the
+  // file already exists and all that must be done is to fetch
+  // the header page into the buffer pool
+  
+  // try to open the file
+  System.out.println("DEBUG: Trying to open the file");
+  
+  Page apage = new Page();
+  _firstDirPageId = null;
+  
+  System.out.println("DEBUG: About to call get_file_entry for " + _fileName);
+  long startTime = System.currentTimeMillis();
+  
+  if (_ftype == ORDINARY)
+    _firstDirPageId = get_file_entry(_fileName);
+  
+  System.out.println("DEBUG: get_file_entry completed in " + (System.currentTimeMillis() - startTime) + " ms");
+  System.out.println("DEBUG: File exists? " + (_firstDirPageId != null ? "Yes" : "No"));
+  
+  if(_firstDirPageId == null)
+  {
+    // file doesn't exist. First create it.
+    System.out.println("DEBUG: Creating new page for first directory page");
+    startTime = System.currentTimeMillis();
+    
+    _firstDirPageId = newPage(apage, 1);
+    
+    System.out.println("DEBUG: newPage completed in " + (System.currentTimeMillis() - startTime) + " ms");
+    System.out.println("DEBUG: New page id: " + (_firstDirPageId != null ? _firstDirPageId.pid : "null"));
+    
+    // check error
+    if(_firstDirPageId == null)
+      throw new HFException(null, "can't new page");
+    
+    // Before add_file_entry - THIS IS THE CRITICAL POINT
+    System.out.println("DEBUG: About to add file entry for: " + _fileName + 
+                    ", pageId: " + (_firstDirPageId.pid));
+    startTime = System.currentTimeMillis();
+    
+    try {
+      add_file_entry(_fileName, _firstDirPageId);
+      System.out.println("DEBUG: add_file_entry completed in " + (System.currentTimeMillis() - startTime) + " ms");
+    } catch (Exception e) {
+      System.out.println("DEBUG: CRITICAL ERROR in add_file_entry: " + e);
+      e.printStackTrace();
+      throw e;
+    }
+    
+    // After initializing directory page
+    System.out.println("DEBUG: Initializing first directory page");
+    HFPage firstDirPage = new HFPage();
+    firstDirPage.init(_firstDirPageId, apage);
+    PageId pageId = new PageId(INVALID_PAGE);
+    
+    firstDirPage.setNextPage(pageId);
+    firstDirPage.setPrevPage(pageId);
+    
+    System.out.println("DEBUG: About to unpin first directory page");
+    unpinPage(_firstDirPageId, true /*dirty*/ );
+    System.out.println("DEBUG: Unpinned first directory page");
+  }
+  else {
+    System.out.println("DEBUG: File already exists, first directory page id: " + _firstDirPageId.pid);
+  }
+  
+  _file_deleted = false;
+  System.out.println("DEBUG: Heapfile constructor completed successfully for: " + _fileName);
+} // end of constructor 
   
   /** Return number of records in file.
    *
@@ -1009,9 +1039,12 @@ public class Heapfile implements Filetype,  GlobalConst {
     PageId tmpId = new PageId();
 
     try {
+      System.out.println("DEBUG: Heapfile.get_file_entry - About to call SystemDefs.JavabaseDB.get_file_entry for: " + filename); // Add this line
       tmpId = SystemDefs.JavabaseDB.get_file_entry(filename);
+      System.out.println("DEBUG: Heapfile.get_file_entry - SystemDefs.JavabaseDB.get_file_entry returned: " + (tmpId == null ? "null" : tmpId.pid)); // Add this line
     }
     catch (Exception e) {
+      System.err.println("DEBUG: Heapfile.get_file_entry - Exception caught from SystemDefs.JavabaseDB.get_file_entry: " + e); // Add this line
       throw new HFDiskMgrException(e,"Heapfile.java: get_file_entry() failed");
     }
 
@@ -1045,4 +1078,4 @@ public class Heapfile implements Filetype,  GlobalConst {
 
 
   
-}// End of HeapFile 
+}// End of HeapFile

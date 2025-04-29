@@ -40,9 +40,8 @@ public class DBInterface {
     private static boolean dbOpen = false;
     
     // Constants for buffer management
-    private static final int DEFAULT_DB_PAGES = 5000;
-    private static final int DEFAULT_BUFFER_PAGES = 100;
-    
+    private static final int DEFAULT_DB_PAGES = GlobalConst.MINIBASE_DB_SIZE;
+    private static final int DEFAULT_BUFFER_PAGES = GlobalConst.NUMBUF;
     /**
      * Main method - entry point for the DB interface.
      * Parses commands and dispatches to appropriate handlers.
@@ -170,7 +169,7 @@ public class DBInterface {
         scanner.close();
         System.out.println("Database interface terminated.");
     }
-    
+
     /**
      * Open a database with the given name.
      * If the database doesn't exist, create it.
@@ -179,39 +178,58 @@ public class DBInterface {
      * @throws Exception if there's an error opening/creating the database
      */
     private static void openDatabase(String dbname) throws Exception {
-        // Check if another database is already open
-        if (dbOpen) {
-            System.out.println("Error: Another database is already open. Close it first.");
-            return;
-        }
-        
-        // Reset page counter to track I/O operations
+        if (dbOpen) {     
+        System.out.println("Error: Another database is already open. Close it first.");
+         return; }
         PCounter.initialize();
-        
         try {
-            // Check if the database exists by trying to open it
+            System.out.println("DEBUG: Attempting to open/create database: " + dbname);
+            // Try to open existing first
+            boolean dbExists = true;
             try {
-                // Try to open the existing database
-                new SystemDefs(dbname, 0, DEFAULT_BUFFER_PAGES, "Clock");
-                System.out.println("Opening existing database: " + dbname);
-            } catch (Exception e) {
-                // If the database doesn't exist, create a new one
-                System.out.println("Database doesn't exist. Creating new database: " + dbname);
-                new SystemDefs(dbname, DEFAULT_DB_PAGES, DEFAULT_BUFFER_PAGES, "Clock");
+                 System.out.println("DEBUG: Trying to instantiate ExtendedSystemDefs for existing DB: " + dbname);
+                 // Use 0 pages to check existence without creating if it fails immediately
+                 new ExtendedSystemDefs(dbname, 0, DEFAULT_BUFFER_PAGES, "Clock");
+                 System.out.println("DEBUG: Successfully instantiated ExtendedSystemDefs for existing DB.");
+                 System.out.println("Opening existing database: " + dbname);
+            } catch (Exception e_open) {
+                 // Analyze the exception to see if it's *really* just "not found"
+                 System.err.println("DEBUG: Exception caught while trying to open existing DB: " + e_open.getClass().getName() + " - " + e_open.getMessage());
+                 // e_open.printStackTrace(); // Uncomment for full stack trace if needed
+    
+                 // Assume DB doesn't exist ONLY if it's a specific, expected exception
+                 // (FileNotFoundException might be too specific, maybe check for HFDiskMgrException related to file not found?)
+                 // For now, let's assume any exception here means we should try creating.
+                 dbExists = false;
             }
-            
-            // Set the current database name and state
+    
+            if (!dbExists) {
+                System.out.println("Database may not exist or failed to open. Attempting to create new database: " + dbname);
+                try {
+                    System.out.println("DEBUG: Trying to instantiate ExtendedSystemDefs for NEW DB: " + dbname);
+                    new ExtendedSystemDefs(dbname, DEFAULT_DB_PAGES, DEFAULT_BUFFER_PAGES, "Clock");
+                    System.out.println("DEBUG: Successfully instantiated ExtendedSystemDefs for NEW DB.");
+                    System.out.println("Created new database: " + dbname);
+                } catch (Exception e_create) {
+                    System.err.println("CRITICAL ERROR: Failed to create new database after open attempt failed!");
+                    e_create.printStackTrace();
+                    throw new Exception("Failed to create new database: " + dbname, e_create);
+                }
+            }
+    
             currentDBName = dbname;
-            dbOpen = true;
-            
-            // Print I/O statistics
+            dbOpen = true; // Set only after successful instantiation
+    
             System.out.println("Database opened successfully.");
             System.out.println("Page reads: " + PCounter.getRCount());
             System.out.println("Page writes: " + PCounter.getWCount());
-            
-        } catch (Exception e) {
-            System.err.println("Error opening database: " + e.getMessage());
-            throw e;
+    
+        } catch (Exception e) { // Catch any other unexpected errors during the process
+            System.err.println("Error in openDatabase overall logic: " + e.getMessage());
+            dbOpen = false; // Ensure DB is marked as not open on failure
+            currentDBName = null;
+            // Clean up SystemDefs? Might be risky if partially initialized.
+            throw e; // Re-throw
         }
     }
     
@@ -261,6 +279,8 @@ public class DBInterface {
      * @throws Exception if there's an error creating the table
      */
     private static void batchCreate(String dataFileName, String relationName) throws Exception {
+        System.out.println("DEBUG: Starting batchCreate for " + dataFileName + " to relation " + relationName);
+        
         if (!dbOpen) {
             System.out.println("Error: No database is open. Please open a database first.");
             return;
@@ -268,167 +288,276 @@ public class DBInterface {
         
         // Reset page counter to track I/O operations
         PCounter.initialize();
+        System.out.println("DEBUG: PCounter initialized");
         
         BufferedReader reader = null;
         Heapfile heapFile = null;
         
         try {
             // Open the data file
-            reader = new BufferedReader(new FileReader(dataFileName));
+            System.out.println("DEBUG: Attempting to open data file: " + dataFileName);
+            try {
+                reader = new BufferedReader(new FileReader(dataFileName));
+                System.out.println("DEBUG: Data file opened successfully");
+            } catch (FileNotFoundException e) {
+                System.err.println("ERROR: Data file not found: " + dataFileName);
+                throw e;
+            }
             
             // Read the number of attributes
-            int attrCount = Integer.parseInt(reader.readLine().trim());
+            System.out.println("DEBUG: Reading attribute count...");
+            String attrCountLine = reader.readLine();
+            System.out.println("DEBUG: Read attribute count line: '" + attrCountLine + "'");
+            
+            int attrCount = Integer.parseInt(attrCountLine.trim());
+            System.out.println("DEBUG: Attribute count parsed as: " + attrCount);
+            
             if (attrCount <= 0) {
-                throw new Exception("Invalid attribute count in data file");
+                throw new Exception("Invalid attribute count in data file: " + attrCount);
             }
             
             // Read the attribute types
-            String[] typeStrs = reader.readLine().trim().split("\\s+");
+            System.out.println("DEBUG: Reading attribute types...");
+            String typesLine = reader.readLine();
+            System.out.println("DEBUG: Read types line: '" + typesLine + "'");
+            
+            String[] typeStrs = typesLine.trim().split("\\s+");
+            System.out.println("DEBUG: Found " + typeStrs.length + " type values");
+            
             if (typeStrs.length != attrCount) {
-                throw new Exception("Mismatch between attribute count and type count");
+                throw new Exception("Mismatch between attribute count (" + attrCount + 
+                                  ") and type count (" + typeStrs.length + ")");
             }
             
             // Convert type strings to AttrType array
+            System.out.println("DEBUG: Converting attribute types...");
             AttrType[] attrTypes = new AttrType[attrCount];
+            System.out.println("DEBUG: Attribute types array created with size " + attrCount);
+            
             for (int i = 0; i < attrCount; i++) {
                 int typeInt = Integer.parseInt(typeStrs[i]);
+                System.out.println("DEBUG: Attribute " + (i+1) + " has type code " + typeInt);
+                
                 switch (typeInt) {
                     case 1: // Integer
                         attrTypes[i] = new AttrType(AttrType.attrInteger);
+                        System.out.println("DEBUG: Attribute " + (i+1) + " set as INTEGER");
                         break;
                     case 2: // Float/Real
                         attrTypes[i] = new AttrType(AttrType.attrReal);
+                        System.out.println("DEBUG: Attribute " + (i+1) + " set as REAL");
                         break;
                     case 3: // String
                         attrTypes[i] = new AttrType(AttrType.attrString);
+                        System.out.println("DEBUG: Attribute " + (i+1) + " set as STRING");
                         break;
                     case 4: // Vector
                         attrTypes[i] = new AttrType(AttrType.attrVector100D);
+                        System.out.println("DEBUG: Attribute " + (i+1) + " set as VECTOR100D");
                         break;
                     default:
+                        System.out.println("ERROR: Invalid attribute type: " + typeInt);
                         throw new Exception("Invalid attribute type: " + typeInt);
                 }
             }
             
             // Count string attributes for size array
+            System.out.println("DEBUG: Counting string attributes...");
             int strCount = 0;
             for (AttrType type : attrTypes) {
                 if (type.attrType == AttrType.attrString) {
                     strCount++;
                 }
             }
+            System.out.println("DEBUG: Found " + strCount + " string attributes");
             
             // Create array for string sizes
+            System.out.println("DEBUG: Creating string sizes array...");
             short[] strSizes = new short[strCount];
-            // We'll use a default size for strings - real implementation would determine from data
+            // We'll use a default size for strings
             for (int i = 0; i < strCount; i++) {
                 strSizes[i] = 32; // default string length
+                System.out.println("DEBUG: String attribute " + (i+1) + " set to size 32");
             }
             
             // Create a heap file for the relation
-            heapFile = new Heapfile(relationName);
+            System.out.println("DEBUG: Creating heap file for relation: " + relationName);
+            System.out.println("DEBUG: Current working directory: " + new File(".").getAbsolutePath());
+            try {
+                System.out.println("DEBUG: About to call Heapfile constructor");
+                heapFile = new Heapfile(relationName);
+                System.out.println("DEBUG: Heap file created successfully");
+            } catch (Exception e) {
+                System.err.println("CRITICAL ERROR in heap file creation: " + e);
+                e.printStackTrace();
+                throw e;
+            }
             
             // Create attribute information array for catalog
+            System.out.println("DEBUG: Creating attribute info for catalog...");
             attrInfo[] attrInfo = new attrInfo[attrCount];
+            
             for (int i = 0; i < attrCount; i++) {
+                System.out.println("DEBUG: Setting up attribute info " + (i+1) + "...");
                 attrInfo[i] = new attrInfo();
                 attrInfo[i].attrName = "attr" + i;
                 attrInfo[i].attrType = attrTypes[i]; 
                 
                 if (attrTypes[i].attrType == AttrType.attrString) {
                     attrInfo[i].attrLen = 32; // Default string length
+                    System.out.println("DEBUG: Attribute " + (i+1) + " (STRING) length set to 32");
                 } else if (attrTypes[i].attrType == AttrType.attrInteger) {
                     attrInfo[i].attrLen = 4;
+                    System.out.println("DEBUG: Attribute " + (i+1) + " (INTEGER) length set to 4");
                 } else if (attrTypes[i].attrType == AttrType.attrReal) {
                     attrInfo[i].attrLen = 4;
+                    System.out.println("DEBUG: Attribute " + (i+1) + " (REAL) length set to 4");
                 } else if (attrTypes[i].attrType == AttrType.attrVector100D) {
                     attrInfo[i].attrLen = 400; // 100 integers * 4 bytes
+                    System.out.println("DEBUG: Attribute " + (i+1) + " (VECTOR100D) length set to 400");
                 }
             }
             
             // Add relation to catalog
+            System.out.println("DEBUG: Adding relation to catalog: " + relationName);
             try {
                 // Use the public createRel method from RelCatalog via ExtendedSystemDefs
                 ExtendedSystemDefs.MINIBASE_RELCAT.createRel(relationName, attrCount, attrInfo);
+                System.out.println("DEBUG: Relation added to catalog successfully");
             } catch (Exception e) {
+                System.err.println("ERROR: Failed to create relation in catalog: " + e.getMessage());
                 throw new Exception("Failed to create relation in catalog: " + e.getMessage());
             }
             
             // Read tuples from the data file and insert them
+            System.out.println("DEBUG: Starting to read and insert tuples...");
             String line;
             int tupleCount = 0;
             
             while (true) {
+                System.out.println("DEBUG: --- Processing tuple #" + (tupleCount + 1) + " ---");
+                
                 // Create a new tuple for insertion
+                System.out.println("DEBUG: Creating new tuple template...");
                 Tuple tuple = new Tuple();
+                
                 // Setup a tuple template
+                System.out.println("DEBUG: Setting tuple header with " + attrCount + " attributes");
                 tuple.setHdr((short) attrCount, attrTypes, strSizes);
+                
                 int tupleSize = tuple.size();
+                System.out.println("DEBUG: Tuple size calculated as " + tupleSize + " bytes");
+                
                 byte[] tupleData = new byte[tupleSize];
+                System.out.println("DEBUG: Created byte array for tuple data");
+                
                 tuple = new Tuple(tupleData, 0, tupleSize);
+                System.out.println("DEBUG: Created new tuple instance with byte array");
+                
                 tuple.setHdr((short) attrCount, attrTypes, strSizes);
+                System.out.println("DEBUG: Reset tuple header");
                 
                 boolean endOfFile = false;
                 
                 // Read a tuple worth of data
                 for (int i = 0; i < attrCount; i++) {
+                    System.out.println("DEBUG: Reading attribute " + (i+1) + " of type " + attrTypes[i].attrType);
+                    
                     line = reader.readLine();
+                    
                     if (line == null) {
+                        System.out.println("DEBUG: End of file reached while reading attribute " + (i+1));
                         endOfFile = true;
                         break;
                     }
                     
+                    System.out.println("DEBUG: Raw line read: '" + line + "'");
                     line = line.trim();
+                    System.out.println("DEBUG: Trimmed line: '" + line + "'");
                     
                     try {
                         switch (attrTypes[i].attrType) {
                             case AttrType.attrInteger:
                                 int intVal = Integer.parseInt(line);
                                 tuple.setIntFld(i+1, intVal);
+                                System.out.println("DEBUG: Set integer field " + (i+1) + " = " + intVal);
                                 break;
                                 
                             case AttrType.attrReal:
                                 float floatVal = Float.parseFloat(line);
                                 tuple.setFloFld(i+1, floatVal);
+                                System.out.println("DEBUG: Set float field " + (i+1) + " = " + floatVal);
                                 break;
                                 
                             case AttrType.attrString:
                                 tuple.setStrFld(i+1, line);
+                                System.out.println("DEBUG: Set string field " + (i+1) + " = '" + line + "'");
                                 break;
                                 
                             case AttrType.attrVector100D:
-                                // Parse a line of 100 integers for the vector
+                                // Parse a line of 100 numbers for the vector
+                                System.out.println("DEBUG: Parsing vector data from line: '" +
+                                                   (line.length() > 50 ? line.substring(0, 50) + "..." : line) + "'");
+
                                 String[] vectorVals = line.split("\\s+");
+                                System.out.println("DEBUG: Split vector into " + vectorVals.length + " values");
+
                                 if (vectorVals.length != 100) {
-                                    throw new Exception("Vector must have exactly 100 values");
+                                    System.out.println("ERROR: Vector must have exactly 100 values, found " +
+                                                     vectorVals.length);
+                                    throw new Exception("Vector must have exactly 100 values, found " + vectorVals.length);
                                 }
-                                
+
                                 int[] vector = new int[100];
                                 for (int j = 0; j < 100; j++) {
-                                    int val = Integer.parseInt(vectorVals[j]);
-                                    // Check range constraint (-10000 to 10000)
-                                    if (val < -10000 || val > 10000) {
-                                        throw new Exception("Vector values must be in range -10000 to 10000");
+                                    try {
+                                        // *** FIX: Parse as float first, then cast to int ***
+                                        float floatVal2 = Float.parseFloat(vectorVals[j]);
+                                        vector[j] = (int) floatVal2; // Cast to integer
+
+                                        // Check range constraint (-10000 to 10000) AFTER casting
+                                        if (vector[j] < -10000 || vector[j] > 10000) {
+                                            System.out.println("ERROR: Vector value (after casting) out of range: " + vector[j]);
+                                            throw new Exception("Vector values must be in range -10000 to 10000");
+                                        }
+                                    } catch (NumberFormatException e) {
+                                        // This will catch errors parsing the float itself
+                                        System.out.println("ERROR: Invalid numeric vector value at position " + j +
+                                                         ": '" + vectorVals[j] + "'");
+                                        // Re-throw with more context
+                                        throw new NumberFormatException("Invalid numeric vector value at position " + j + ": '" + vectorVals[j] + "'");
                                     }
-                                    vector[j] = val;
                                 }
-                                
+
                                 tuple.setVectorFld(i+1, vector);
+                                System.out.println("DEBUG: Set vector field " + (i+1) +
+                                                 " (first 3 values: " + vector[0] + "," + vector[1] + "," + vector[2] + "...)");
                                 break;
                         }
                     } catch (Exception e) {
+                        System.err.println("ERROR parsing attribute " + (i+1) + ": " + e.getMessage());
                         throw new Exception("Error parsing attribute " + (i+1) + ": " + e.getMessage());
                     }
                 }
                 
                 // If we reached end of file before completing a tuple, break the loop
                 if (endOfFile) {
+                    System.out.println("DEBUG: End of file reached, stopping tuple insertion");
                     break;
                 }
                 
                 // Insert the tuple into the heap file
-                heapFile.insertRecord(tuple.getTupleByteArray());
-                tupleCount++;
+                System.out.println("DEBUG: Inserting tuple into heap file...");
+                try {
+                    RID rid = heapFile.insertRecord(tuple.getTupleByteArray());
+                    System.out.println("DEBUG: Tuple inserted successfully, RID: [" + 
+                                     rid.pageNo + "," + rid.slotNo + "]");
+                    tupleCount++;
+                    System.out.println("DEBUG: Tuple count now: " + tupleCount);
+                } catch (Exception e) {
+                    System.err.println("ERROR inserting tuple: " + e.getMessage());
+                    throw e;
+                }
             }
             
             // Report success and statistics
@@ -438,11 +567,14 @@ public class DBInterface {
             
         } catch (Exception e) {
             System.err.println("Error creating table: " + e.getMessage());
+            e.printStackTrace();
             
             // Clean up resources if an error occurred
             if (heapFile != null) {
                 try {
+                    System.out.println("DEBUG: Attempting to delete heap file due to error");
                     heapFile.deleteFile();
+                    System.out.println("DEBUG: Heap file deleted successfully");
                 } catch (Exception ex) {
                     System.err.println("Error deleting heap file during cleanup: " + ex.getMessage());
                 }
@@ -452,6 +584,7 @@ public class DBInterface {
         } finally {
             // Close resources
             if (reader != null) {
+                System.out.println("DEBUG: Closing file reader");
                 reader.close();
             }
         }
@@ -463,150 +596,253 @@ public class DBInterface {
             System.out.println("Error: No database is open. Please open a database first.");
             return;
         }
-        
+
         System.out.println("Creating index on " + relationName + " column " + columnId + "...");
         PCounter.initialize(); // Reset counters for this operation
-        
+
         Heapfile heapFile = null;
         Scan scan = null;
-        
+        IndexDesc checkIndexDesc = new IndexDesc(); // For checking existence
+        boolean proceed = false;
+
         try {
-            // Create a RelDesc object to receive relation info (output parameter pattern)
+            // --- 1. Get Relation and Attribute Info ---
             RelDesc relDesc = new RelDesc();
-            
-            // Get relation information using output parameter pattern
             ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(relationName, relDesc);
-            
-            // Check if column ID is valid (assuming 1-based indexing for user input)
+
             if (columnId < 1 || columnId > relDesc.attrCnt) {
                 throw new Exception("Column ID " + columnId + " is out of range (1-" + relDesc.attrCnt + ")");
             }
-            
-            // Create array for attribute descriptors
+
             AttrDesc[] attrDescs = new AttrDesc[relDesc.attrCnt];
-            
-            // Initialize each AttrDesc in the array
-            for (int i = 0; i < relDesc.attrCnt; i++) {
-                attrDescs[i] = new AttrDesc();
-            }
-            
-            // Get all attribute information
+            for (int i = 0; i < relDesc.attrCnt; i++) attrDescs[i] = new AttrDesc();
             ExtendedSystemDefs.MINIBASE_ATTRCAT.getRelInfo(relationName, relDesc.attrCnt, attrDescs);
-            
-            // Get the specific attribute (converting to 0-based indexing)
-            AttrDesc attrDesc = attrDescs[columnId-1];
-            
-            // Access fields through correct visibility
+
+            AttrDesc attrDesc = attrDescs[columnId - 1];
             AttrType attrType = attrDesc.attrType;
-            String attrName = attrDesc.attrName; 
-            
-            heapFile = new Heapfile(relationName);
-            
-            // Rest of the code remains the same...
+            String attrName = attrDesc.attrName;
+            IndexType indexTypeToCreate; // Determine the type we intend to create
+
+            // Determine intended index type based on attribute type
             if (attrType.attrType == AttrType.attrVector100D) {
-                // Create an LSH index for vector data
-                System.out.println("Creating LSH index with " + lValue + " layers and " + 
-                                  hValue + " hash functions per layer...");
-                
-                // Initialize LSH index
+                indexTypeToCreate = new IndexType(IndexType.LSHFIndex);
+            } else if (attrType.attrType == AttrType.attrInteger || attrType.attrType == AttrType.attrReal || attrType.attrType == AttrType.attrString) {
+                indexTypeToCreate = new IndexType(IndexType.B_Index);
+            } else {
+                throw new Catalogbadtype(null, "Cannot create index on attribute type: " + attrType);
+            }
+
+            // --- 2. Check if Index Already Exists in Catalog ---
+            System.out.println("DEBUG: Checking if index already exists for " + relationName + "." + attrName);
+            try {
+                // Use the corrected getInfo method
+                ExtendedSystemDefs.MINIBASE_INDCAT.getInfo(relationName, attrName, indexTypeToCreate, checkIndexDesc);
+
+                // If getInfo succeeded, the index already exists!
+                System.out.println("DEBUG: Index already exists.");
+                throw new Catalogindexexists(null, "Index already exists on " + relationName + "." + attrName);
+
+            } catch (Catalogindexnotfound e_notfound) {
+                // *** This is the expected case - index does NOT exist, okay to proceed ***
+                System.out.println("DEBUG: Index does not exist. Proceeding with creation.");
+                proceed = true;
+            }
+            // Let other exceptions from getInfo (like Catalogioerror) propagate up
+
+            if (!proceed) {
+                 // Should not happen if logic is correct, but as a safeguard
+                 throw new Exception("Index existence check failed unexpectedly.");
+            }
+
+            // --- 3. Create and Populate the Physical Index ---
+            heapFile = new Heapfile(relationName);
+            String indexFileName = null; // Store the created index file name
+            int indexedTupleCount = 0;
+
+            // Prepare schema info for reading tuples
+            AttrType[] tupleAttrTypes = new AttrType[relDesc.attrCnt];
+            int strCount = 0;
+            for (int i = 0; i < relDesc.attrCnt; i++) {
+                tupleAttrTypes[i] = attrDescs[i].attrType;
+                if (tupleAttrTypes[i].attrType == AttrType.attrString) strCount++;
+            }
+            short[] tupleStrSizes = new short[strCount];
+            int strIndex = 0;
+            for (int i = 0; i < relDesc.attrCnt; i++) {
+                if (tupleAttrTypes[i].attrType == AttrType.attrString) {
+                    tupleStrSizes[strIndex++] = (short) attrDescs[i].attrLen;
+                }
+            }
+
+            // --- LSH Index Creation ---
+            if (indexTypeToCreate.indexType == IndexType.LSHFIndex) {
+                System.out.println("Creating LSH index with " + lValue + " layers and " + hValue + " hash functions per layer...");
                 LSHFIndex lshIndex = new LSHFIndex(hValue, lValue);
-                
-                // Prepare schema info to read tuples correctly
-                AttrType[] attrTypes = new AttrType[relDesc.attrCnt];
-                int strCount = 0;
-                for (int i = 0; i < relDesc.attrCnt; i++) {
-                    attrTypes[i] = attrDescs[i].attrType;
-                    if (attrTypes[i].attrType == AttrType.attrString) {
-                        strCount++;
-                    }
-                }
-                
-                // Create strSizes array for string attributes
-                short[] strSizes = new short[strCount];
-                int strIndex = 0;
-                for (int i = 0; i < relDesc.attrCnt; i++) {
-                    if (attrTypes[i].attrType == AttrType.attrString) {
-                        strSizes[strIndex++] = (short) attrDescs[i].attrLen;
-                    }
-                }
-                
-                // Scan all records and add to LSH index
+
                 scan = heapFile.openScan();
                 RID rid = new RID();
                 Tuple tuple = null;
-                int count = 0;
-                
+
                 while ((tuple = scan.getNext(rid)) != null) {
-                    // Deep copy the RID since it's reused by scan.getNext()
                     RID ridCopy = new RID(rid.pageNo, rid.slotNo);
-                    
-                    // Set header to properly interpret tuple data
-                    tuple.setHdr((short)attrTypes.length, attrTypes, strSizes);
-                    
+                    tuple.setHdr((short) tupleAttrTypes.length, tupleAttrTypes, tupleStrSizes);
                     try {
-                        // Get vector data (columnId is 1-based for user, but getVectorFld wants 1-based too)
                         int[] vectorData = tuple.getVectorFld(columnId);
                         Vector100Dtype vectorObj = new Vector100Dtype(vectorData);
                         Vector100DKey key = new Vector100DKey(vectorObj);
-                        
-                        // Insert into LSH index
                         lshIndex.insert(key, ridCopy);
-                        count++;
+                        indexedTupleCount++;
                     } catch (Exception e) {
-                        System.err.println("Warning: Could not index tuple: " + e.getMessage());
+                        System.err.println("Warning: Could not index tuple for LSH: " + e.getMessage());
                     }
                 }
-                
-                // Close the scan before saving index
                 scan.closescan();
                 scan = null;
-                
-                // Build index file name: RELNAME + columnNumber + "_L" + L + "_h" + h
-                String indexFileName = relationName + columnId + "_L" + lValue + "_h" + hValue + ".ser";
-                
-                // Save the LSH index
+
+                // Build index file name and save
+                indexFileName = relationName + columnId + "_L" + lValue + "_h" + hValue + ".ser";
                 lshIndex.saveIndex(indexFileName);
-                
-                // Register the index in the catalog
-                // Create a new IndexDesc for this index
-                IndexDesc indexDesc = new IndexDesc();
-                
-                // These fields are package-private but should be accessible from catalog methods
-                indexDesc.relName = relationName;
-                indexDesc.attrName = attrName;
-                indexDesc.accessType = new IndexType(IndexType.LSHFIndex);
-                indexDesc.order = new TupleOrder(TupleOrder.Random); 
-                indexDesc.clustered = 0;
-                
-                // Add index info to catalog
-                ExtendedSystemDefs.MINIBASE_INDCAT.addInfo(indexDesc);
-                
-                System.out.println("Created LSH index on " + relationName + "." + attrName + 
-                                  " with " + count + " entries.");
-                System.out.println("Index saved to file: " + indexFileName);
-                
-            } else {
-                // For BTree index, use the catalog's addIndex method
-                String indexName = relationName + columnId + ".btree";
-                System.out.println("Creating B-Tree index " + indexName);
-                
-                // Note: attrName might be needed instead of columnId for the catalog
-                ExtendedSystemDefs.MINIBASE_INDCAT.addIndex(relationName, attrName, 
-                                    new IndexType(IndexType.B_Index), 0);
-                
-                System.out.println("Created B-Tree index on " + relationName + "." + attrName);
+                System.out.println("LSH index structure saved to file: " + indexFileName);
+
+            // --- B-Tree Index Creation ---
+        } else if (indexTypeToCreate.indexType == IndexType.B_Index) {
+            // Build B-Tree index file name (using catalog helper is good practice)
+            indexFileName = ExtendedSystemDefs.MINIBASE_INDCAT.buildIndexName(relationName, attrName, indexTypeToCreate);
+            System.out.println("Creating B-Tree index file: " + indexFileName);
+            BTreeFile btreeFile = null;
+
+            try {
+                // --- MODIFICATION START ---
+                int btreeKeySize;
+                int btreeKeyType; // Declare here, determine below
+
+                if (attrType.attrType == AttrType.attrReal) {
+                    // Since data is whole numbers, cast Real to Integer for the key:
+                    btreeKeyType = AttrType.attrInteger; // Tell BTreeFile to expect Integer keys
+                    btreeKeySize = 4; // Standard integer size
+                } else {
+                    // For other types, use their natural type and length
+                    btreeKeyType = attrType.attrType;
+                    btreeKeySize = attrDesc.attrLen;
+                }
+                // --- MODIFICATION END ---
+
+                // Create the BTreeFile using the determined type and size
+                btreeFile = new BTreeFile(indexFileName, btreeKeyType, btreeKeySize, 0); // 0 for non-delete
+
+
+                // Scan data and insert into BTree
+                scan = heapFile.openScan();
+                RID rid = new RID();
+                Tuple tuple = null;
+
+                while ((tuple = scan.getNext(rid)) != null) {
+                    // Make a copy of RID
+                    RID ridCopy = new RID(rid.pageNo, rid.slotNo);
+                    // Set header
+                    tuple.setHdr((short) tupleAttrTypes.length, tupleAttrTypes, tupleStrSizes);
+
+                    KeyClass key = null;
+                    try {
+                        // Extract key based on type
+                        switch (attrType.attrType) { // Still switch on the original attribute type
+                            case AttrType.attrInteger:
+                                key = new IntegerKey(tuple.getIntFld(columnId));
+                                break;
+                            case AttrType.attrReal:
+                                // Casting float (which is a whole number) to IntegerKey
+                                key = new IntegerKey((int)tuple.getFloFld(columnId)); // <-- CAST HERE
+                                break;
+                            case AttrType.attrString:
+                                key = new StringKey(tuple.getStrFld(columnId));
+                                break;
+                        }
+
+                        // Insert into BTree
+                        if (key != null) {
+                            btreeFile.insert(key, ridCopy); // Use the IntegerKey
+                            indexedTupleCount++;
+                        }
+                    } catch (Exception e) { // Catch potential duplicate key exceptions here if BTree throws them
+                         System.err.println("Warning: Could not insert key for RID [" + ridCopy.pageNo + "," + ridCopy.slotNo + "] into BTree: " + e.getMessage());
+                         e.printStackTrace();
+                         // Optionally re-throw if insertion failure should stop the whole process
+                    }
+                } // End while scan
+                scan.closescan();
+                scan = null;
+
+            }  finally {
+                // Ensure BTree file is closed if created
+                if (btreeFile != null) {
+                    try { btreeFile.close(); } catch (Exception e_close) { /* Ignore */ }
+                }
+                // Ensure scan is closed if open
+                if (scan != null) {
+                    try { scan.closescan(); } catch (Exception e_scan) { /* Ignore */ }
+                }
             }
-            
-            // Report I/O statistics
+             System.out.println("B-Tree index populated.");
+        } // End B-Tree creation
+
+            // --- 4. Add Entry to Index Catalog (AFTER physical index is created) ---
+            System.out.println("DEBUG: Adding index entry to catalog...");
+            IndexDesc indexDesc = new IndexDesc();
+            indexDesc.relName = relationName;
+            indexDesc.attrName = attrName;
+            indexDesc.accessType = indexTypeToCreate; // Use the determined type
+            indexDesc.order = (indexTypeToCreate.indexType == IndexType.B_Index) ?
+                              new TupleOrder(TupleOrder.Ascending) : new TupleOrder(TupleOrder.Random);
+            indexDesc.clustered = 0; // Assuming non-clustered
+            indexDesc.distinctKeys = 0; // Placeholder - could estimate later
+            indexDesc.indexPages = 0;   // Placeholder - could estimate later
+
+            if (ExtendedSystemDefs.MINIBASE_INDCAT == null) {
+                System.err.println("CRITICAL ERROR: ExtendedSystemDefs.MINIBASE_INDCAT is NULL before calling addIndexCatalogEntry!");
+                throw new NullPointerException("MINIBASE_INDCAT is null. Catalog initialization likely failed.");
+            }
+
+
+            // Use the new simplified method
+            ExtendedSystemDefs.MINIBASE_INDCAT.addIndexCatalogEntry(indexDesc);
+            System.out.println("DEBUG: Index entry added to catalog.");
+
+            // --- 5. Update Attribute Catalog Index Count ---
+            System.out.println("DEBUG: Updating attribute catalog index count...");
+            // Need to read the attribute record again to modify it safely
+            AttrDesc attrToUpdate = new AttrDesc();
+            ExtendedSystemDefs.MINIBASE_ATTRCAT.getInfo(relationName, attrName, attrToUpdate);
+            attrToUpdate.indexCnt++; // Increment index count
+            // Remove old entry and add updated entry (or use an update method if available)
+            ExtendedSystemDefs.MINIBASE_ATTRCAT.removeInfo(relationName, attrName);
+            ExtendedSystemDefs.MINIBASE_ATTRCAT.addInfo(attrToUpdate);
+            System.out.println("DEBUG: Attribute catalog updated.");
+
+
+            // --- 6. Report Success ---
+            if (indexTypeToCreate.indexType == IndexType.LSHFIndex) {
+                 System.out.println("Created LSH index on " + relationName + "." + attrName +
+                                  " with " + indexedTupleCount + " entries.");
+                 System.out.println("Index structure saved to file: " + indexFileName);
+            } else {
+                 System.out.println("Created B-Tree index on " + relationName + "." + attrName +
+                                  " with " + indexedTupleCount + " entries.");
+                 System.out.println("Index file created: " + indexFileName);
+            }
+
             System.out.println("Index creation complete.");
             System.out.println("Disk pages read: " + PCounter.getRCount());
             System.out.println("Disk pages written: " + PCounter.getWCount());
-            
+
         } catch (Exception e) {
             // Close resources if still open
             if (scan != null) {
                 try { scan.closescan(); } catch (Exception ex) { /* Ignore cleanup errors */ }
             }
+            // Consider deleting partially created index file if appropriate
+            System.err.println("Error during index creation: " + e.getMessage());
+            e.printStackTrace(); // Print stack trace for debugging
+            // Re-throw the exception to signal failure
             throw e;
         }
     }
@@ -828,7 +1064,7 @@ public class DBInterface {
                                         break;
                                     case AttrType.attrReal:
                                         // Convert float to string for BTree
-                                        key = new StringKey(Float.toString(tuple.getFloFld(indexAttrPos)));
+                                        key = new IntegerKey((int)tuple.getFloFld(indexAttrPos));
                                         break;
                                     case AttrType.attrString:
                                         key = new StringKey(tuple.getStrFld(indexAttrPos));
@@ -1227,7 +1463,7 @@ private static void batchDelete(String updateFileName, String relationName) thro
                                         key = new IntegerKey((Integer)keyValue);
                                         break;
                                     case AttrType.attrReal:
-                                        key = new StringKey(Float.toString((Float)keyValue));
+                                        key = new IntegerKey((int)((Float)keyValue).floatValue());
                                         break;
                                     case AttrType.attrString:
                                         key = new StringKey((String)keyValue);
@@ -1904,7 +2140,8 @@ private static void executeFilterQuery(String queryExpr, String relName, int buf
     expr[0].operand1.symbol = new FldSpec(new RelSpec(RelSpec.outer), queryAttrNum);
 
     // Set operand2 based on the attribute type
-    switch (attrTypes[queryAttrNum-1].attrType) {
+    AttrType queryAttrActualType = attrTypes[queryAttrNum-1];
+    switch (queryAttrActualType.attrType) {
         case AttrType.attrInteger:
             expr[0].type2 = new AttrType(AttrType.attrInteger);
             expr[0].operand2.integer = Integer.parseInt(targetValue);
@@ -1927,7 +2164,6 @@ private static void executeFilterQuery(String queryExpr, String relName, int buf
     boolean useIndex = indexOption.equalsIgnoreCase("H");
 
     iterator.Iterator scan = null;
-
     try {
         // Create appropriate scan based on index option
         if (useIndex) {
@@ -1959,11 +2195,23 @@ private static void executeFilterQuery(String queryExpr, String relName, int buf
                         if (indexAttrPos == queryAttrNum &&
                             indexDescs[i].accessType.indexType == IndexType.B_Index) {
 
+                            // *** START CHANGE: Adjust CondExpr for Real->Integer BTree ***
+                            if (queryAttrActualType.attrType == AttrType.attrReal) {
+                                System.out.println("DEBUG: Adjusting CondExpr for Real->Integer BTree index scan.");
+                                // Modify the expression to use Integer type and casted value
+                                expr[0].type2 = new AttrType(AttrType.attrInteger);
+                                // Re-parse and cast the target value
+                                expr[0].operand2.integer = (int)Float.parseFloat(targetValue);
+                                // Clear the float value just in case
+                                expr[0].operand2.real = 0.0f;
+                            }
+                            // *** END CHANGE ***
+
                             // Get index name
                             String indexName = ExtendedSystemDefs.MINIBASE_INDCAT.buildIndexName(
                                 relName, indexDescs[i].attrName, indexDescs[i].accessType);
 
-                            // Create index scan
+                            // Create index scan (now using the potentially modified expr)
                             scan = new IndexScan(
                                 new IndexType(IndexType.B_Index),
                                 relName,
@@ -1973,14 +2221,14 @@ private static void executeFilterQuery(String queryExpr, String relName, int buf
                                 relDesc.attrCnt,
                                 projlist.length,
                                 projlist,
-                                expr,
+                                expr, // Pass the potentially modified expr
                                 queryAttrNum,  // field number of the indexed field
                                 false         // false = return full tuple, not just index key
                             );
 
                             indexFound = true;
                             System.out.println("Using BTree index for filter query");
-                            break;
+                            break; // Found suitable index, stop searching
                         }
                     }
                 } catch (Exception e) {
@@ -1990,16 +2238,19 @@ private static void executeFilterQuery(String queryExpr, String relName, int buf
 
             if (!indexFound) {
                 System.out.println("No suitable index found, using sequential scan");
+                // ** Ensure expr is reset if it was modified for index but index wasn't used **
+                // (Re-create based on original type if needed, though FileScan might handle mismatch gracefully)
+                // For simplicity, let's assume FileScan handles the original expr correctly.
                 scan = new FileScan(relName, attrTypes, strSizes,
                     (short) relDesc.attrCnt, (short) projlist.length,
-                    projlist, expr);
+                    projlist, expr); // Pass the original or modified expr
             }
         } else {
             // Use FileScan (no index)
             System.out.println("Using sequential scan for filter query");
             scan = new FileScan(relName, attrTypes, strSizes,
                 (short) relDesc.attrCnt, (short) projlist.length,
-                projlist, expr);
+                projlist, expr); // Pass the original expr
         }
 
         // Print header
@@ -2889,7 +3140,6 @@ private static String findLSHIndex(String relName, int queryAttrNum, RelDesc rel
      }
      return null; // No suitable index found
 }
-
 
     
 }

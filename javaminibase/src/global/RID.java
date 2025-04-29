@@ -7,7 +7,7 @@ import java.io.*;
 /** class RID
  */
 
-public class RID{
+public class RID implements Serializable{
   
   /** public int slotNo
    */
