@@ -32,72 +32,101 @@ public class TupleUtils
    *          1        if the tuple is greater,
    *         -1        if the tuple is smaller,                              
    */
-  public static int CompareTupleWithTuple(AttrType fldType,
-					  Tuple  t1, int t1_fld_no,
-					  Tuple  t2, int t2_fld_no)
-    throws IOException,
-	   UnknowAttrType,
-	   TupleUtilsException
-    {
-      int   t1_i,  t2_i;
-      float t1_r,  t2_r;
-      String t1_s, t2_s;
-      
-      switch (fldType.attrType) 
-	{
-	case AttrType.attrInteger:                // Compare two integers.
-	  try {
-	    t1_i = t1.getIntFld(t1_fld_no);
-	    t2_i = t2.getIntFld(t2_fld_no);
-	  }catch (FieldNumberOutOfBoundException e){
-	    throw new TupleUtilsException(e, "FieldNumberOutOfBoundException is caught by TupleUtils.java");
-	  }
-	  if (t1_i == t2_i) return  0;
-	  if (t1_i <  t2_i) return -1;
-	  if (t1_i >  t2_i) return  1;
-	  
-	case AttrType.attrReal:                // Compare two floats
-	  try {
-	    t1_r = t1.getFloFld(t1_fld_no);
-	    t2_r = t2.getFloFld(t2_fld_no);
-	  }catch (FieldNumberOutOfBoundException e){
-	    throw new TupleUtilsException(e, "FieldNumberOutOfBoundException is caught by TupleUtils.java");
-	  }
-	  if (t1_r == t2_r) return  0;
-	  if (t1_r <  t2_r) return -1;
-	  if (t1_r >  t2_r) return  1;
-	  
-	case AttrType.attrString:                // Compare two strings
-	  try {
-	    t1_s = t1.getStrFld(t1_fld_no);
-	    t2_s = t2.getStrFld(t2_fld_no);
-	  }catch (FieldNumberOutOfBoundException e){
-	    throw new TupleUtilsException(e, "FieldNumberOutOfBoundException is caught by TupleUtils.java");
-	  }
-	  
-	  // Now handle the special case that is posed by the max_values for strings...
-	  if(t1_s.compareTo( t2_s)>0)return 1;
-	  if (t1_s.compareTo( t2_s)<0)return -1;
-	  return 0;
-  
-    case AttrType.attrVector100D: // Compare two 100D vectors.
-    try {
-        int[] vector1 = t1.getVectorFld(t1_fld_no);
-        int[] vector2 = t2.getVectorFld(t2_fld_no);
-        double distance1 = calculateEuclideanDistance(vector1, new int[100]); // Distance from origin
-        double distance2 = calculateEuclideanDistance(vector2, new int[100]);
-        return Double.compare(distance1, distance2);
-    } catch (FieldNumberOutOfBoundException e) {
-        throw new TupleUtilsException(e, "FieldNumberOutOfBoundException is caught by TupleUtils.java");
-    }
+  public static int CompareTupleWithTuple(AttrType fldType, // This is the type of the *attribute* field
+                                          Tuple    t1, int t1_fld_no, // Tuple containing the attribute
+                                          Tuple    t2, int t2_fld_no) // Tuple containing the literal (or another attr)
+    throws IOException, UnknowAttrType, TupleUtilsException
+ {
+      int   t1_i = 0, t2_i = 0; // Initialize locals
+      float t1_r = 0.0f, t2_r = 0.0f;
+      String t1_s = null, t2_s = null;
 
+     // --- Type-guessing logic removed. ---
+     // The caller (PredEval) is now responsible for handling the
+     // specific Real attribute vs. Integer literal case directly.
 
-	default:
-	  
-	  throw new UnknowAttrType(null, "Don't know how to handle attrSymbol, attrNull");
-	  
-	}
-    }
+     // --- Standard comparison logic based ONLY on fldType (attribute type) ---
+     // Assumes t2 contains a value compatible with fldType for comparison.
+     System.out.println("DEBUG: TupleUtils (Simplified) - Entering switch for type: " + fldType.attrType);
+     switch (fldType.attrType) {
+      case AttrType.attrInteger:
+          try {
+              t1_i = t1.getIntFld(t1_fld_no);
+              // Assuming t2 contains an Integer literal if fldType is Integer
+              t2_i = t2.getIntFld(t2_fld_no);
+              System.out.println("DEBUG: TupleUtils (Switch - Int case): Comparing " + t1_i + " vs " + t2_i);
+          } catch (Exception e) {
+              throw new TupleUtilsException(e, "Type mismatch or error comparing integers. Field " + t1_fld_no + " vs " + t2_fld_no);
+          }
+          if (t1_i == t2_i) return 0;
+          if (t1_i < t2_i) return -1;
+          return 1;
+
+      case AttrType.attrReal: // Handles Real vs Real comparison ('N' case or 'H' fallback)
+          System.out.println("DEBUG: TupleUtils.CompareTupleWithTuple (Switch - Real case) - Entered Real vs Real.");
+          try {
+              // We know t1 is Real (fldType).
+              // We assume t2 contains a Real literal because the Real vs Int case is handled earlier.
+              t1_r = t1.getFloFld(t1_fld_no);
+              t2_r = t2.getFloFld(t2_fld_no); // Assumes t2 holds a float
+
+              System.out.println("DEBUG: TupleUtils.CompareTupleWithTuple (Switch - Real case): Comparing " + t1_r + " vs " + t2_r);
+              final float EPSILON = 0.00001f;
+              System.out.println("DEBUG: TupleUtils.CompareTupleWithTuple (Switch - Real case): Checking Math.abs(" + t1_r + " - " + t2_r + ") < " + EPSILON);
+              if (Math.abs(t1_r - t2_r) < EPSILON) {
+                  System.out.println("DEBUG: TupleUtils.CompareTupleWithTuple (Switch - Real case): Values are equal within epsilon.");
+                  return 0; // Considered equal
+              } else if (t1_r < t2_r) {
+                  System.out.println("DEBUG: TupleUtils.CompareTupleWithTuple (Switch - Real case): t1 < t2.");
+                  return -1; // t1 is smaller
+              } else { // t1_r > t2_r
+                  System.out.println("DEBUG: TupleUtils.CompareTupleWithTuple (Switch - Real case): t1 > t2.");
+                  return 1; // t1 is greater
+              }
+          } catch (Exception e) {
+              System.err.println("ERROR: TupleUtils.CompareTupleWithTuple (Switch - Real case) - Exception: " + e.getMessage());
+              e.printStackTrace();
+              throw new TupleUtilsException(e, "Type mismatch or error comparing floats. Field " + t1_fld_no + " vs " + t2_fld_no);
+          }
+         // break; // Unreachable after return
+
+      case AttrType.attrString:
+          try {
+              t1_s = t1.getStrFld(t1_fld_no);
+              t2_s = t2.getStrFld(t2_fld_no); // Assumes t2 holds a string
+              System.out.println("DEBUG: TupleUtils (Switch - String case): Comparing \"" + t1_s + "\" vs \"" + t2_s + "\"");
+          } catch (FieldNumberOutOfBoundException e){
+              throw new TupleUtilsException(e, "FieldNumberOutOfBoundException comparing strings.");
+          }
+          int cmp = t1_s.compareTo(t2_s);
+          if(cmp > 0) return 1;
+          if (cmp < 0) return -1;
+          return 0;
+          // break; // Unreachable after return
+
+      case AttrType.attrVector100D:
+          try {
+              int[] vector1 = t1.getVectorFld(t1_fld_no);
+              int[] vector2 = t2.getVectorFld(t2_fld_no); // Assumes t2 holds a vector
+              // Assuming comparison based on distance from origin
+              int[] origin = new int[100]; // Assuming vector size is 100
+              java.util.Arrays.fill(origin, 0);
+              double distance1 = calculateEuclideanDistance(vector1, origin);
+              double distance2 = calculateEuclideanDistance(vector2, origin);
+              System.out.println("DEBUG: TupleUtils (Switch - Vector case): Comparing Dist1=" + distance1 + " vs Dist2=" + distance2);
+              return Double.compare(distance1, distance2);
+          } catch (FieldNumberOutOfBoundException e) {
+              throw new TupleUtilsException(e, "FieldNumberOutOfBoundException comparing vectors.");
+          } catch (Exception e) {
+              throw new TupleUtilsException(e, "Error comparing vectors.");
+          }
+          // break; // Unreachable after return
+
+      default:
+          throw new UnknowAttrType(null, "Don't know how to handle comparison for attribute type " + fldType.attrType);
+
+    } // End switch
+ }
   
     public static double calculateEuclideanDistance(int[] vector1, int[] vector2) {
       double sum = 0;
@@ -133,7 +162,7 @@ public class TupleUtils
 	   UnknowAttrType,
 	   TupleUtilsException
     {
-      return CompareTupleWithTuple(fldType, t1, t1_fld_no, value, t1_fld_no);
+      return CompareTupleWithTuple(fldType, t1, t1_fld_no, value, 1);
     }
   
   /**

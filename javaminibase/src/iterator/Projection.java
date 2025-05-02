@@ -52,6 +52,9 @@ public class Projection
 		case AttrType.attrString:
 		  Jtuple.setStrFld(i+1, t1.getStrFld(perm_mat[i].offset));
 		  break;
+    case AttrType.attrVector100D: 
+      Jtuple.setVectorFld(i+1, t1.getVectorFld(perm_mat[i].offset));
+      break;  
 		default:
 		  
 		  throw new UnknowAttrType("Don't know how to handle attrSymbol, attrNull");
@@ -71,6 +74,9 @@ public class Projection
 		case AttrType.attrString:
 		  Jtuple.setStrFld(i+1, t2.getStrFld(perm_mat[i].offset));
 		  break;
+    case AttrType.attrVector100D: 
+      Jtuple.setVectorFld(i+1, t2.getVectorFld(perm_mat[i].offset));
+      break;  
 		default:
 		  
 		  throw new UnknowAttrType("Don't know how to handle attrSymbol, attrNull");  
@@ -100,46 +106,54 @@ public class Projection
    *@exception IOException some I/O fault 
    */
   
-  public static void Project(Tuple  t1, AttrType type1[], 
-                             Tuple Jtuple, FldSpec  perm_mat[], 
+  public static void Project(Tuple  t1, AttrType type1[],
+                             Tuple Jtuple, FldSpec  perm_mat[],
                              int nOutFlds
-			     )
+                 )
     throws UnknowAttrType,
-	   WrongPermat,
-	   FieldNumberOutOfBoundException,
-	   IOException
+       WrongPermat,
+       FieldNumberOutOfBoundException,
+       IOException
     {
-      
-      
+
+
       for (int i = 0; i < nOutFlds; i++)
-	{
-	  switch (perm_mat[i].relation.key)
-	    {
-	    case RelSpec.outer:      // Field of outer (t1)
-	      switch (type1[perm_mat[i].offset-1].attrType)
-		{
-		case AttrType.attrInteger:
-		  Jtuple.setIntFld(i+1, t1.getIntFld(perm_mat[i].offset));
-		  break;
-		case AttrType.attrReal:
-		  Jtuple.setFloFld(i+1, t1.getFloFld(perm_mat[i].offset));
-		  break;
-		case AttrType.attrString:
-		  Jtuple.setStrFld(i+1, t1.getStrFld(perm_mat[i].offset));
-		  break;
-		default:
-		  
-		  throw new UnknowAttrType("Don't know how to handle attrSymbol, attrNull"); 
-	
-		}
-	      break;
-	      
-	    default:
-	      
-	      throw new WrongPermat("something is wrong in perm_mat");
-	     
-	    }
-	}
+    {
+      switch (perm_mat[i].relation.key)
+        {
+        case RelSpec.outer:      // Field of outer (t1)
+              // Get the field number from the projection list
+              int fieldNo = perm_mat[i].offset;
+              // Get the type from the input schema using the field number
+          switch (type1[fieldNo-1].attrType) // Use fieldNo-1 as index
+        {
+        case AttrType.attrInteger:
+          Jtuple.setIntFld(i+1, t1.getIntFld(fieldNo));
+          break;
+        case AttrType.attrReal:
+          Jtuple.setFloFld(i+1, t1.getFloFld(fieldNo));
+          break;
+        case AttrType.attrString:
+          Jtuple.setStrFld(i+1, t1.getStrFld(fieldNo));
+          break;
+        // *** ADD THIS CASE ***
+        case AttrType.attrVector100D:
+          Jtuple.setVectorFld(i+1, t1.getVectorFld(fieldNo));
+          break;
+        // *** END ADDITION ***
+        default:
+          // The error message could be improved
+          throw new UnknowAttrType("Projection.Project: Unsupported attribute type " + type1[fieldNo-1].attrType);
+
+        }
+          break;
+
+        default:
+
+          throw new WrongPermat("Projection.Project: Invalid relation specification in perm_mat");
+
+        }
+    }
       return;
     }
   

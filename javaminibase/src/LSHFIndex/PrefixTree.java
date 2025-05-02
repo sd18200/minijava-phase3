@@ -118,44 +118,64 @@ public class PrefixTree implements Serializable {
 
     // Perform a nearest-neighbor search using actual vector distances
     public List<RIDDistancePair> nearestNeighborSearch(Vector100Dtype target, int k) {
+        // Use a Max Heap based on distance. Stores the k *smallest* distances found so far.
+        // The largest of these k smallest distances will be at the top (peek).
         PriorityQueue<RIDDistancePair> pq = new PriorityQueue<>(
-            Comparator.comparingDouble(p -> -p.distance)); // Max heap
-        
+            Comparator.comparingDouble((RIDDistancePair p) -> p.distance).reversed() // Max heap based on distance
+        );
+
         int targetHash = computeHash(target);
-        
-        // First pass: collect all candidates using hamming distance as filter
+
+        // Iterate through potential candidate buckets based on hash proximity (optional optimization)
+        // For simplicity and correctness, we can iterate through all entries if needed,
+        // but filtering by Hamming distance is a common LSH strategy.
         for (Map.Entry<Integer, Map<Vector100Dtype, List<RID>>> entry : tree.entrySet()) {
             int hashValue = entry.getKey();
-            // Use hamming distance as a quick filter
-            if (hammingDistance(hashValue, targetHash) <= h/2) {
-                for (Map.Entry<Vector100Dtype, List<RID>> vectorEntry : entry.getValue().entrySet()) {
-                    Vector100Dtype vector = vectorEntry.getKey();
-                    // Calculate actual distance between vectors
-                    double actualDistance = vector.distanceTo(target);
-                    
-                    for (RID rid : vectorEntry.getValue()) {
-                        if (k == 0 || pq.size() < k) {
-                            // Add ALL entries if k=0 or add until we have k entries
+
+            // Optional: Filter buckets by Hamming distance (adjust threshold as needed)
+            // if (hammingDistance(hashValue, targetHash) > h / 2) { // Example threshold
+            //     continue; // Skip buckets likely too far
+            // }
+
+            // Process vectors within the candidate bucket
+            for (Map.Entry<Vector100Dtype, List<RID>> vectorEntry : entry.getValue().entrySet()) {
+                Vector100Dtype vector = vectorEntry.getKey();
+                // Calculate the actual Euclidean distance
+                double actualDistance = vector.distanceTo(target);
+
+                for (RID rid : vectorEntry.getValue()) {
+                    if (k == 0) {
+                        // If k=0, add all candidates found in this layer
+                        pq.add(new RIDDistancePair(rid, actualDistance));
+                    } else {
+                        // If k > 0, maintain only the k smallest distances
+                        if (pq.size() < k) {
+                            // If the heap isn't full, just add the new pair
                             pq.add(new RIDDistancePair(rid, actualDistance));
-                        } else if (actualDistance < -pq.peek().distance) {
-                            // Replace max element if we found a closer one
-                            pq.poll();
-                            pq.add(new RIDDistancePair(rid, actualDistance));
+                        } else {
+                            // If the heap is full, check if the new distance is smaller
+                            // than the largest distance currently in the heap (pq.peek()).
+                            if (actualDistance < pq.peek().distance) {
+                                // If smaller, remove the largest element and add the new one.
+                                pq.poll(); // Remove the largest
+                                pq.add(new RIDDistancePair(rid, actualDistance)); // Add the new smaller one
+                            }
+                            // Otherwise, the new distance is larger than all k elements currently
+                            // in the heap, so we discard it.
                         }
                     }
                 }
             }
         }
-        
-        // Convert priority queue to sorted list
-        List<RIDDistancePair> results = new ArrayList<>();
-        RIDDistancePair pair;
-        while ((pair = pq.poll()) != null) {
-            // Fix the negated distance
-            pair.distance = -pair.distance;
-            results.add(0, pair); // Add at front to reverse order
+
+        // Convert the priority queue (max heap) to a sorted list (ascending distance)
+        List<RIDDistancePair> results = new ArrayList<>(pq.size());
+        while (!pq.isEmpty()) {
+            results.add(pq.poll()); // Poll elements (largest distance first)
         }
-        
+        // Reverse the list to get ascending order (smallest distance first)
+        Collections.reverse(results);
+
         return results;
     }
     

@@ -1,1 +1,1 @@
-Sort(2, target1, 0, 1, 2)
+Sort(2,  phase3_demo_data/target1.txt, 0, 1 2 3 4)

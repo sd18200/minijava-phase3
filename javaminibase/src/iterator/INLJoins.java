@@ -282,12 +282,26 @@ public class INLJoins extends Iterator {
 
             // RID found, fetch the inner tuple from the heap file.
             try {
-                // Fix: Correctly handle getting a tuple from the heapfile
-                Tuple temp = innerHeapFile.getRecord(inner_rid);
+                // Get record directly as tuple and check for null
+                Tuple temp = null;
+                try {
+                    temp = innerHeapFile.getRecord(inner_rid);
+                } catch (Exception e) {
+                    System.err.println("Warning: Invalid RID in index: " + inner_rid + " - " + e.getMessage());
+                    continue; // Skip this RID and try the next one
+                }
+                
+                if (temp == null) {
+                    System.err.println("Warning: RID in index points to null record: " + inner_rid);
+                    continue; // Skip this RID
+                }
+                
+                // Create a new inner tuple to avoid reference issues
+                inner_tuple = new Tuple();
+                inner_tuple.setHdr((short) in2_len, _in2, t2_str_sizes); // Set header BEFORE copying data
                 inner_tuple.tupleCopy(temp);
-                inner_tuple.setHdr((short) in2_len, _in2, t2_str_sizes);
             } catch (Exception e) {
-                System.err.println("Failed to retrieve inner tuple for RID: " + e.getMessage());
+                System.err.println("Failed to process inner tuple for RID: " + inner_rid + " - " + e.getMessage());
                 continue; // Try next RID
             }
 

@@ -133,143 +133,288 @@ public class IndexScan extends Iterator {
    * @exception UnknownKeyTypeException key type unknown
    * @exception IOException from the lower layer
    */
-  public Tuple get_next() 
-    throws IndexException, 
-	   UnknownKeyTypeException,
-	   IOException
+  public Tuple get_next()
+    throws IndexException,
+           UnknownKeyTypeException,
+           IOException
   {
-    RID rid;
-    int unused;
-    KeyDataEntry nextentry = null;
+    RID rid = null; // Initialize RID
+    KeyDataEntry nextentry = null; // Initialize nextentry
 
-    try {
-      nextentry = indScan.get_next();
+    try { // Outer try for the whole method logic
+
+        // --- Get next entry from BTree ---
+        try {
+            nextentry = indScan.get_next(); // Call BTFileScan.get_next()
+        } catch (ScanIteratorException e) { // Catch specific BTree scan exception
+            System.err.println("ERROR: IndexScan.get_next(): ScanIteratorException from indScan.get_next(): " + e.getMessage()); // ADDED
+            e.printStackTrace(); // ADDED
+            throw new IndexException(e, "Error getting next entry from BTFileScan");
+        } catch (Exception e) { // Catch unexpected runtime errors from indScan.get_next()
+            System.err.println("ERROR: IndexScan.get_next(): Unexpected Exception from indScan.get_next(): " + e.getMessage()); // ADDED
+            e.printStackTrace(); // ADDED
+            throw new IndexException(e, "Unexpected error in indScan.get_next()");
+        }
+
+        // Loop while there are entries from the index scan
+        while(nextentry != null) {
+
+            // --- Handle index_only case ---
+            if (index_only) {
+                // only need to return the key
+                AttrType[] attrType = new AttrType[1];
+                short[] s_sizes = new short[1]; // Note: Size might need adjustment for strings
+
+                if (_types[_fldNum -1].attrType == AttrType.attrInteger) {
+                  attrType[0] = new AttrType(AttrType.attrInteger);
+                  s_sizes[0] = 4; // Size of integer
+                  try {
+                    Jtuple.setHdr((short) 1, attrType, s_sizes);
+                    Jtuple.setIntFld(1, ((IntegerKey)nextentry.key).getKey().intValue());
+                  } catch (Exception e) {
+                    System.err.println("ERROR: IndexScan.get_next(): Exception setting index_only Integer tuple: " + e.getMessage()); // ADDED
+                    e.printStackTrace(); // ADDED
+                    throw new IndexException(e, "IndexScan.java: Error setting index_only Integer tuple");
+                  }
+                } else if (_types[_fldNum -1].attrType == AttrType.attrString) {
+                  attrType[0] = new AttrType(AttrType.attrString);
+                  // calculate string size of _fldNum - This logic might be fragile if _s_sizes isn't just for strings
+                  int count = 0;
+                  int strSizeIndex = -1;
+                  for (int i=0; i<_fldNum; i++) { // Iterate up to _fldNum (exclusive) as it's 1-based index
+                    if (i < _types.length && _types[i].attrType == AttrType.attrString) { // Check bounds for _types
+                        if (i == _fldNum - 1) { // If this string field IS the indexed field
+                           strSizeIndex = count; // Index in _s_sizes corresponds to the count-th string
+                        }
+                        count++;
+                    }
+                  }
+                  // Validate calculated index against _s_sizes array bounds
+                  if (strSizeIndex < 0 || _s_sizes == null || strSizeIndex >= _s_sizes.length) {
+                       System.err.println("ERROR: IndexScan.get_next(): Invalid string size index calculation for index_only. Index=" + strSizeIndex + ", _s_sizes length=" + (_s_sizes == null ? "null" : _s_sizes.length)); // ADDED
+                       throw new IndexException(null, "IndexScan.java: Invalid string size index calculation for index_only.");
+                  }
+                  s_sizes[0] = _s_sizes[strSizeIndex]; // Get the correct string size
+
+                  try {
+                    Jtuple.setHdr((short) 1, attrType, s_sizes);
+                    Jtuple.setStrFld(1, ((StringKey)nextentry.key).getKey());
+                  } catch (Exception e) {
+                     System.err.println("ERROR: IndexScan.get_next(): Exception setting index_only String tuple: " + e.getMessage()); // ADDED
+                     e.printStackTrace(); // ADDED
+                    throw new IndexException(e, "IndexScan.java: Error setting index_only String tuple");
+                  }
+                } else {
+                  // attrReal not supported for now
+                  System.err.println("ERROR: IndexScan.get_next(): index_only requested for unsupported type: " + _types[_fldNum -1].attrType); // ADDED
+                  throw new UnknownKeyTypeException("Only Integer and String keys are supported for index_only scan");
+                }
+                return Jtuple; // Return the key-only tuple
+            } // End index_only block
+
+            // --- Full Tuple Retrieval and Processing (not index_only) ---
+
+            // Extract the RID from the KeyDataEntry
+            try {
+                rid = ((LeafData) nextentry.data).getData();
+            } catch (ClassCastException e) {
+                System.err.println("ERROR: IndexScan.get_next(): ClassCastException casting entry data to LeafData for key " + nextentry.key); // ADDED
+                e.printStackTrace(); // ADDED
+                throw new IndexException(e, "Error casting entry data to LeafData");
+            } catch (Exception e) { // Catch other potential errors during data access
+                System.err.println("ERROR: IndexScan.get_next(): Exception getting RID from entry data for key " + nextentry.key + ": " + e.getMessage()); // ADDED
+                e.printStackTrace(); // ADDED
+                throw new IndexException(e, "Error getting RID from entry data");
+            }
+
+            // Retrieve the full tuple from the heap file using the RID
+            try {
+                if (f == null) {
+                     System.err.println("CRITICAL ERROR: IndexScan.get_next(): Heapfile 'f' is null!"); // ADDED
+                     throw new IndexException(null, "Internal error: Heapfile 'f' is null in IndexScan");
+                }
+                tuple1 = f.getRecord(rid); // Fetch the record into tuple1
+
+                if (tuple1 == null) {
+                    // This might happen if the record was deleted between index entry creation and now
+                    System.err.println("Warning: IndexScan.get_next(): RID " + rid + " from index points to a deleted/invalid record in heapfile. Trying next entry."); // ADDED
+                    // Continue to the next index entry by getting it at the end of the loop
+                } else {
+
+                    // Set header for the retrieved tuple (using the base relation's schema)
+                    if (_types == null) {
+                         System.err.println("CRITICAL ERROR: IndexScan.get_next(): Base relation schema '_types' is null!"); // ADDED
+                         throw new IndexException(null, "Internal error: Base relation schema (_types) not set in IndexScan");
+                    }
+                    tuple1.setHdr((short) _noInFlds, _types, _s_sizes); // Set header on tuple1
+
+                    // --- Evaluate Predicates ---
+                    boolean eval = false; // Initialize eval
+                    try {
+                        // Assuming _selects might be null if no predicates are applied after index lookup
+                        if (_selects != null) {
+                             eval = PredEval.Eval(_selects, tuple1, null, _types, null);
+                        } else {
+                             eval = true; // If no selects, the tuple passes
+                        }
+                    } catch (Exception e) {
+                        System.err.println("ERROR: IndexScan.get_next(): Exception during predicate evaluation: " + e.getMessage()); // ADDED
+                        e.printStackTrace(); // ADDED
+                        throw new IndexException(e, "IndexScan.java: Error during predicate evaluation");
+                    }
+
+                    // --- Projection (if predicate passed) ---
+                    if (eval) {
+                        // Check projection info
+                        if (perm_mat == null) { // Assuming perm_mat holds projection info (outFlds)
+                             System.err.println("CRITICAL ERROR: IndexScan.get_next(): Projection info (perm_mat) is null!"); // ADDED
+                             throw new IndexException(null, "Internal error: Projection info (perm_mat) not set in IndexScan");
+                        }
+                        // Jtuple should already have its header set up in the constructor by TupleUtils.setup_op_tuple
+
+                        try {
+                            Projection.Project(tuple1, _types, Jtuple, perm_mat, _noOutFlds); // Project tuple1 into Jtuple
+                        } catch (Exception e) { // Catch FieldNumberOutOfBoundException, etc.
+                            System.err.println("ERROR: IndexScan.get_next(): Exception during projection: " + e.getMessage()); // ADDED
+                            e.printStackTrace(); // ADDED
+                            throw new IndexException(e, "Error during projection");
+                        }
+
+                        return Jtuple; // Return the projected tuple
+                    } else {
+                         // If eval is false, loop continues to get the next entry from indScan below
+                    }
+                } // End if (tuple1 != null)
+            } catch (Exception e) { // Catch HFException, HFBufMgrException, InvalidSlotNumberException, etc. from getRecord or setHdr
+                System.err.println("ERROR: IndexScan.get_next(): Exception retrieving record or setting header for RID " + rid + ": " + e.getMessage()); // ADDED
+                e.printStackTrace(); // ADDED
+                throw new IndexException(e, "Error retrieving record from heap file or setting header for RID " + rid);
+            }
+
+            // If we reach here, it means either:
+            // 1. f.getRecord(rid) returned null (deleted tuple)
+            // 2. Predicate evaluation failed (eval == false)
+            // In both cases, we need to get the next entry from the index scan.
+            try {
+                nextentry = indScan.get_next();
+            } catch (Exception e) {
+                System.err.println("ERROR: IndexScan.get_next(): Exception calling indScan.get_next() at end of loop: " + e.getMessage()); // ADDED
+                e.printStackTrace(); // ADDED
+                throw new IndexException(e, "IndexScan.java: BTree error at end of loop");
+            }
+
+        } // End while(nextentry != null)
+
+        return null; // End of scan
+
+    } catch (Exception finalE) { // Catch any unexpected exception thrown within the method logic
+        System.err.println("ERROR: IndexScan.get_next(): UNEXPECTED EXCEPTION caught by outer handler: " + finalE.getMessage()); // ADDED
+        finalE.printStackTrace(); // Log the exception that caused premature exit
+        // Wrap unexpected runtime exceptions
+        throw new IndexException(finalE, "Unexpected exception wrapper in IndexScan.get_next()");
     }
-    catch (Exception e) {
-      throw new IndexException(e, "IndexScan.java: BTree error");
-    }	  
-    
-    while(nextentry != null) {
-      if (index_only) {
-	// only need to return the key 
-
-	AttrType[] attrType = new AttrType[1];
-	short[] s_sizes = new short[1];
-	
-	if (_types[_fldNum -1].attrType == AttrType.attrInteger) {
-	  attrType[0] = new AttrType(AttrType.attrInteger);
-	  try {
-	    Jtuple.setHdr((short) 1, attrType, s_sizes);
-	  }
-	  catch (Exception e) {
-	    throw new IndexException(e, "IndexScan.java: Heapfile error");
-	  }
-	  
-	  try {
-	    Jtuple.setIntFld(1, ((IntegerKey)nextentry.key).getKey().intValue());
-	  }
-	  catch (Exception e) {
-	    throw new IndexException(e, "IndexScan.java: Heapfile error");
-	  }	  
-	}
-	else if (_types[_fldNum -1].attrType == AttrType.attrString) {
-	  
-	  attrType[0] = new AttrType(AttrType.attrString);
-	  // calculate string size of _fldNum
-	  int count = 0;
-	  for (int i=0; i<_fldNum; i++) {
-	    if (_types[i].attrType == AttrType.attrString)
-	      count ++;
-	  } 
-	  s_sizes[0] = _s_sizes[count-1];
-	  
-	  try {
-	    Jtuple.setHdr((short) 1, attrType, s_sizes);
-	  }
-	  catch (Exception e) {
-	    throw new IndexException(e, "IndexScan.java: Heapfile error");
-	  }
-	  
-	  try {
-	    Jtuple.setStrFld(1, ((StringKey)nextentry.key).getKey());
-	  }
-	  catch (Exception e) {
-	    throw new IndexException(e, "IndexScan.java: Heapfile error");
-	  }	  
-	}
-	else {
-	  // attrReal not supported for now
-	  throw new UnknownKeyTypeException("Only Integer and String keys are supported so far"); 
-	}
-	return Jtuple;
-      }
-      
-      // not index_only, need to return the whole tuple
-      rid = ((LeafData)nextentry.data).getData();
-      try {
-	tuple1 = f.getRecord(rid);
-      }
-      catch (Exception e) {
-	throw new IndexException(e, "IndexScan.java: getRecord failed");
-      }
-      
-      try {
-	tuple1.setHdr((short) _noInFlds, _types, _s_sizes);
-      }
-      catch (Exception e) {
-	throw new IndexException(e, "IndexScan.java: Heapfile error");
-      }
-    
-      boolean eval;
-      try {
-	eval = PredEval.Eval(_selects, tuple1, null, _types, null);
-      }
-      catch (Exception e) {
-	throw new IndexException(e, "IndexScan.java: Heapfile error");
-      }
-      
-      if (eval) {
-	// need projection.java
-	try {
-	  Projection.Project(tuple1, _types, Jtuple, perm_mat, _noOutFlds);
-	}
-	catch (Exception e) {
-	  throw new IndexException(e, "IndexScan.java: Heapfile error");
-	}
-
-	return Jtuple;
-      }
-
-      try {
-	nextentry = indScan.get_next();
-      }
-      catch (Exception e) {
-	throw new IndexException(e, "IndexScan.java: BTree error");
-      }	  
-    }
-    
-    return null; 
   }
   
   /**
-   * Cleaning up the index scan, does not remove either the original
-   * relation or the index from the database.
-   * @exception IndexException error from the lower layer
-   * @exception IOException from the lower layer
+   * Cleaning up the index scan.
+   * Unpins the leaf page currently pinned by the scan (via DestroyBTreeFileScan)
+   * and the header page pinned by the BTreeFile object (via indFile.close()).
+   * Does not remove either the original relation or the index from the database.
+   * @exception IndexException error from the lower layer (can wrap other exceptions)
+   * @exception IOException from the lower layer (potentially from DestroyBTreeFileScan)
+   * @exception JoinsException (Assuming Iterator.close() throws this)
+   * @exception SortException (Assuming Iterator.close() throws this)
+   * @exception InvalidRelation (Assuming Iterator.close() throws this)
+   * @exception BufmgrException (Assuming Iterator.close() might throw a general buffer exception)
+   * Note: We remove the specific bufmgr exceptions from throws and wrap them.
    */
-  public void close() throws IOException, IndexException
+
+  public void close()
+    throws IOException,
+      IndexException
   {
     if (!closeFlag) {
-      if (indScan instanceof BTFileScan) {
-	try {
-	  ((BTFileScan)indScan).DestroyBTreeFileScan();
-	}
-	catch(Exception e) {
-	  throw new IndexException(e, "BTree error in destroying index scan.");
-	}
-      }
-      
-      closeFlag = true; 
+        Exception scanCloseException = null; // To store exception from DestroyBTreeFileScan
+        Exception fileCloseException = null; // To store exception from indFile.close()
+
+        try {
+            // --- 1. Close the underlying IndexFileScan (e.g., BTFileScan) ---
+            if (indScan != null) {
+                try {
+                    if (indScan instanceof BTFileScan) {
+                        ((BTFileScan) indScan).DestroyBTreeFileScan();
+                    } else {
+                    }
+                } catch (IOException | PageUnpinnedException | InvalidFrameNumberException | HashEntryNotFoundException | ReplacerException e) {
+                    // Catch specific exceptions that DestroyBTreeFileScan might throw
+                    scanCloseException = e; // Store the exception
+                    System.err.println("ERROR: IndexScan.close() exception during DestroyBTreeFileScan: " + e.getMessage());
+                } catch (Exception e) { // Catch any other unexpected runtime exceptions
+                     scanCloseException = e;
+                     System.err.println("ERROR: IndexScan.close() UNEXPECTED exception during DestroyBTreeFileScan: " + e.getMessage());
+                } finally {
+                    indScan = null; // Release reference even if close failed
+                }
+            } else {
+            }
+
+            // --- 2. Close the IndexFile (e.g., BTreeFile) ---
+            if (indFile != null) {
+                try {
+                    if (indFile instanceof BTreeFile) {
+                        ((BTreeFile) indFile).close();
+                    } else {
+                    }
+                } catch (PageUnpinnedException | InvalidFrameNumberException | HashEntryNotFoundException | ReplacerException e) {
+                     // Catch specific exceptions that BTreeFile.close might throw
+                    fileCloseException = e; // Store the exception
+                    System.err.println("ERROR: IndexScan.close() exception during indFile.close(): " + e.getMessage());
+                } catch (Exception e) { // Catch any other unexpected runtime exceptions
+                     fileCloseException = e;
+                     System.err.println("ERROR: IndexScan.close() UNEXPECTED exception during indFile.close(): " + e.getMessage());
+                } finally {
+                    indFile = null; // Release reference even if close failed
+                }
+            } else {
+            }
+
+        } finally {
+            closeFlag = true; // Ensure flag is set regardless of exceptions during close attempts
+
+            // --- 3. Handle and re-throw exceptions ---
+            // Prioritize throwing the exception from closing the BTreeFile (header page)
+            if (fileCloseException != null) {
+                if (scanCloseException != null) {
+                    System.err.println("ERROR: IndexScan.close() also encountered error during scan cleanup (DestroyBTreeFileScan): " + scanCloseException.getMessage());
+                }
+                // --- WRAP specific bufmgr exceptions in IndexException ---
+                if (fileCloseException instanceof PageUnpinnedException ||
+                    fileCloseException instanceof InvalidFrameNumberException ||
+                    fileCloseException instanceof HashEntryNotFoundException ||
+                    fileCloseException instanceof ReplacerException) {
+                     throw new IndexException(fileCloseException, "Buffer manager error closing index file (BTreeFile/header page).");
+                }
+                // Wrap other exceptions from indFile.close()
+                throw new IndexException(fileCloseException, "Error closing index file (BTreeFile/header page).");
+
+            } else if (scanCloseException != null) {
+                // If only the scan close failed, handle that exception
+                // Rethrow IOException directly if allowed by Iterator.close()
+                if (scanCloseException instanceof IOException) throw (IOException) scanCloseException;
+
+                // --- WRAP specific bufmgr exceptions in IndexException ---
+                if (scanCloseException instanceof PageUnpinnedException ||
+                    scanCloseException instanceof InvalidFrameNumberException ||
+                    scanCloseException instanceof HashEntryNotFoundException ||
+                    scanCloseException instanceof ReplacerException) {
+                     throw new IndexException(scanCloseException, "Buffer manager error closing index scan (DestroyBTreeFileScan/leaf page).");
+                }
+                // Wrap others
+                throw new IndexException(scanCloseException, "Error closing index scan (DestroyBTreeFileScan/leaf page).");
+            }
+            // If no exceptions occurred, the finally block completes normally.
+        }
+    } else {
     }
   }
   

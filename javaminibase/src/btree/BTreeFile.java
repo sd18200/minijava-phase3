@@ -238,15 +238,35 @@ public class BTreeFile extends IndexFile
    *@exception ReplacerException  error from the lower layer
    */
   public void close()
-    throws PageUnpinnedException, 
-	   InvalidFrameNumberException, 
-	   HashEntryNotFoundException,
+    throws PageUnpinnedException,
+       InvalidFrameNumberException,
+       HashEntryNotFoundException,
            ReplacerException
     {
-      if ( headerPage!=null) {
-	SystemDefs.JavabaseBM.unpinPage(headerPageId, true);
-	headerPage=null;
-      }  
+      System.out.println("DEBUG: BTreeFile.close() called for file: " + dbname); // Use dbname if filename not available
+      // Check headerPageId first, as headerPage might be nullified prematurely
+      if ( headerPageId!=null && headerPageId.pid != INVALID_PAGE) {
+          try {
+              System.out.println("DEBUG: BTreeFile.close() attempting to unpin header page: " + headerPageId.pid);
+              // --- FIX: Use dirty = false ---
+              SystemDefs.JavabaseBM.unpinPage(headerPageId, false);
+              System.out.println("DEBUG: BTreeFile.close() successfully unpinned header page: " + headerPageId.pid);
+              // Mark as invalid after successful unpin
+              headerPageId.pid = INVALID_PAGE;
+          } catch (Exception e) {
+               System.err.println("ERROR: BTreeFile.close() failed to unpin header page " + headerPageId.pid + ": " + e.getMessage());
+               // Re-throw specific buffer manager exceptions
+               if (e instanceof PageUnpinnedException) throw (PageUnpinnedException)e;
+               if (e instanceof HashEntryNotFoundException) throw (HashEntryNotFoundException)e;
+               if (e instanceof InvalidFrameNumberException) throw (InvalidFrameNumberException)e;
+               if (e instanceof ReplacerException) throw (ReplacerException)e;
+               // Optionally wrap other exceptions
+          }
+      } else {
+           System.out.println("DEBUG: BTreeFile.close(): headerPageId is null or invalid, no unpin needed.");
+      }
+      // Nullify the headerPage object reference regardless
+      headerPage=null;
     }
   
   /** Destroy entire B+ tree file.
@@ -1017,15 +1037,16 @@ public class BTreeFile extends IndexFile
    *        null if no key was found.
    */
   
-  BTLeafPage findRunStart (KeyClass lo_key, 
-			   RID startrid)
-    throws IOException, 
-	   IteratorException,  
-	   KeyNotMatchException,
-	   ConstructPageException, 
-	   PinPageException, 
-	   UnpinPageException
+  BTLeafPage findRunStart (KeyClass lo_key,
+               RID startrid)
+    throws IOException,
+       IteratorException,
+       KeyNotMatchException,
+       ConstructPageException,
+       PinPageException,
+       UnpinPageException
     {
+      System.out.println("DEBUG: BTreeFile.findRunStart entered. lo_key=" + (lo_key == null ? "null" : lo_key.toString())); // ADDED
       BTLeafPage  pageLeaf;
       BTIndexPage pageIndex;
       Page page;
@@ -1036,102 +1057,126 @@ public class BTreeFile extends IndexFile
       PageId nextpageno;
       RID curRid;
       KeyDataEntry curEntry;
-      
+
       pageno = headerPage.get_rootId();
-      
-      if (pageno.pid == INVALID_PAGE){        // no pages in the BTREE
-        pageLeaf = null;                // should be handled by 
-        // startrid =INVALID_PAGEID ;             // the caller
+
+      if (pageno.pid == INVALID_PAGE){
+        pageLeaf = null;                    // no pages in the BTREE
         return pageLeaf;
       }
-      
+
       page= pinPage(pageno);
       sortPage=new BTSortedPage(page, headerPage.get_keyType());
-      
-      
+
+
       if ( trace!=null ) {
-	trace.writeBytes("VISIT node " + pageno + lineSep);
-	trace.flush();
+        trace.writeBytes( "VISIT node " + pageno + lineSep);
+        trace.flush();
       }
-      
-      
+
+
       // ASSERTION
       // - pageno and sortPage is the root of the btree
       // - pageno and sortPage valid and pinned
-      
+
       while (sortPage.getType() == NodeType.INDEX) {
-	pageIndex=new BTIndexPage(page, headerPage.get_keyType()); 
-	prevpageno = pageIndex.getPrevPage();
-	curEntry= pageIndex.getFirst(startrid);
-	while ( curEntry!=null && lo_key != null 
-		&& BT.keyCompare(curEntry.key, lo_key) < 0) {
-	  
-          prevpageno = ((IndexData)curEntry.data).getData();
-          curEntry=pageIndex.getNext(startrid);
-	}
-	
-	unpinPage(pageno);
-	
-	pageno = prevpageno;
-	page=pinPage(pageno);
-	sortPage=new BTSortedPage(page, headerPage.get_keyType()); 
-	
-	
-	if ( trace!=null )
-	  {
-	    trace.writeBytes( "VISIT node " + pageno+lineSep);
-	    trace.flush();
-	  }
-	
-	
-      }
-      
+        pageIndex = new BTIndexPage(page, headerPage.get_keyType());
+        // prevpageno = pageIndex.getPrevPage(); // Not directly used in logic below
+
+        PageId childPageId; // Store the determined child page ID
+
+        if (lo_key == null) {
+             // If lo_key is null, we need the leftmost leaf page.
+             // The first entry on an index page points to the subtree for keys < first key.
+             // However, the prevPage pointer points to the leftmost child.
+             childPageId = pageIndex.getPrevPage();
+             if (childPageId.pid == INVALID_PAGE) {
+                 // This might happen in specific BTree implementations, but usually the leftmost pointer is valid.
+                 System.err.println("ERROR: BTreeFile.findRunStart: Index page " + pageno.pid + " has invalid leftmost child pointer (prevPage)!"); // ADDED
+                 unpinPage(pageno);
+                 return null;
+             }
+        } else {
+            // lo_key is not null, find the correct child pointer by iterating through keys
+            curRid = new RID(); // Need a RID for iteration
+            curEntry = pageIndex.getFirst(curRid);
+            childPageId = pageIndex.getPrevPage(); // Start with the pointer for keys < first key
+
+            // Iterate through keys on the index page
+            while (curEntry != null && BT.keyCompare(lo_key, curEntry.key) >= 0) {
+                 // If lo_key >= current index key, update childPageId to this entry's pointer
+                 // and move to the next key.
+                 childPageId = ((IndexData)curEntry.data).getData();
+                 curEntry = pageIndex.getNext(curRid); // Move to next index entry
+            }
+            // After loop: childPageId holds the pointer to the correct child subtree
+            // (either the initial prevPage or the data from the last entry where lo_key >= key)
+        }
+
+        unpinPage(sortPage.getCurPage()); // Unpin the index page
+
+        pageno = childPageId; // Update pageno to the chosen child
+        page = pinPage(pageno); // Pin the child page
+        sortPage=new BTSortedPage(page, headerPage.get_keyType()); // Create sorted page for child
+
+      } // End while index page
+
+      // Now sortPage should be a LEAF page
       pageLeaf = new BTLeafPage(page, headerPage.get_keyType() );
-      
-      curEntry=pageLeaf.getFirst(startrid);
+
+      // Position scan on the leaf page
+      curEntry=pageLeaf.getFirst(startrid); // Get the first record on the leaf page
       while (curEntry==null) {
-	// skip empty leaf pages off to left
-	nextpageno = pageLeaf.getNextPage();
-	unpinPage(pageno);
-	if (nextpageno.pid == INVALID_PAGE) {
-	  // oops, no more records, so set this scan to indicate this.
-	  return null;
-	}
-	
-	pageno = nextpageno; 
-	pageLeaf=  new BTLeafPage( pinPage(pageno), headerPage.get_keyType());    
-	curEntry=pageLeaf.getFirst(startrid);
+        // Leaf page is empty, try the next leaf page
+        nextpageno = pageLeaf.getNextPage();
+        unpinPage(pageno); // Unpin the empty leaf page
+        if (nextpageno.pid == INVALID_PAGE) {
+            return null; // No records found at all
+        }
+        // Pin the next leaf page
+        pageno = nextpageno;
+        page = pinPage(pageno);
+        pageLeaf = new BTLeafPage(page, headerPage.get_keyType());
+        curEntry=pageLeaf.getFirst(startrid); // Try getting first record again
       }
-      
+
       // ASSERTIONS:
-      // - curkey, curRid: contain the first record on the
-      //     current leaf page (curkey its key, cur
+      // - curEntry is not null
       // - pageLeaf, pageno valid and pinned
-      
-      
+      // - startrid points to the first record on pageLeaf
+
+
       if (lo_key == null) {
-	return pageLeaf;
-	// note that pageno/pageLeaf is still pinned; 
-	// scan will unpin it when done
+        // If lo_key is null, we are already at the start. startrid is set.
+        return pageLeaf;
       }
-      
+
+      // lo_key is not null, iterate on the leaf page to find the first key >= lo_key
       while (BT.keyCompare(curEntry.key, lo_key) < 0) {
-	curEntry= pageLeaf.getNext(startrid);
-	while (curEntry == null) { // have to go right
-	  nextpageno = pageLeaf.getNextPage();
-	  unpinPage(pageno);
-	  
-	  if (nextpageno.pid == INVALID_PAGE) {
-	    return null;
-	  }
-	  
-	  pageno = nextpageno;
-	  pageLeaf=new BTLeafPage(pinPage(pageno), headerPage.get_keyType());
-	  
-	  curEntry=pageLeaf.getFirst(startrid);
-	}
+        curEntry=pageLeaf.getNext(startrid);
+        if (curEntry == null) {
+             // Reached end of this leaf page, move to the next one
+             nextpageno = pageLeaf.getNextPage();
+             unpinPage(pageno); // Unpin current leaf page
+             if (nextpageno.pid == INVALID_PAGE) {
+                 return null; // Key not found, and no more pages
+             }
+             // Pin the next leaf page
+             pageno = nextpageno;
+             page = pinPage(pageno);
+             pageLeaf = new BTLeafPage(page, headerPage.get_keyType());
+             curEntry=pageLeaf.getFirst(startrid); // Get first record of new page
+             if (curEntry == null) {
+                 // This should ideally not happen if pages are linked correctly
+                 System.err.println("ERROR: BTreeFile.findRunStart: Found an empty leaf page (" + pageno.pid + ") after a non-empty one during scan!"); // ADDED
+                 unpinPage(pageno);
+                 return null;
+             }
+        }
       }
-      
+
+      // We found an entry where curEntry.key >= lo_key
+      // startrid is correctly positioned by getFirst/getNext.
       return pageLeaf;
     }
   

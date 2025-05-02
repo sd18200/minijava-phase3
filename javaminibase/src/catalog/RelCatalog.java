@@ -426,50 +426,87 @@ public class RelCatalog extends Heapfile
   
   // REMOVE INFORMATION ON A RELATION FROM CATALOG
   public void removeInfo(String relation)
-    throws RelCatalogException, 
-	   IOException, 
-	   Catalogmissparam,
-	   Catalogattrnotfound
+    throws RelCatalogException,
+       IOException,
+       Catalogmissparam,
+       // Catalogattrnotfound, // Changed exception type below
+       Catalogrelnotfound // More appropriate exception if relation not found
     {
-      RID rid = null;
+      // *** FIX 1: Initialize RID ***
+      RID rid = new RID();
       Scan pscan = null;
-      int recSize;
-      RelDesc record = null;
-      
+      // int recSize; // Unused
+      // *** FIX 2: Initialize RelDesc ***
+      RelDesc record = new RelDesc();
+      boolean found = false; // Flag to track if relation is found
+
       if (relation == null)
-	throw new Catalogmissparam(null, "MISSING_PARAM");
-      
-      try {
-	pscan = new Scan(this);
-      }
-      catch (Exception e1) {
-	System.err.println ("Scan"+e1);
-	throw new RelCatalogException(e1, "scan failed");
-      }
-      
-      while(true) {
-	try {
-	  tuple = pscan.getNext(rid);
-	  if (tuple == null) 
-	    throw new Catalogattrnotfound(null,
-					  "Catalog Attribute not Found!");
-	  read_tuple(tuple, record);
-	}
-	catch (Exception e4) {
-	  System.err.println ("read_tuple"+e4);
-	  throw new RelCatalogException(e4, "read_tuple failed");
-	}
-	
-	if (record.relName.equalsIgnoreCase(relation)==true) {
-	  try {
-	    deleteRecord(rid);
-	  }
-	  catch (Exception e3) {
-	    System.err.println ("deleteRecord"+e3);
-	    throw new RelCatalogException(e3, "deleteRecord failed");
-	  }
-	  return;
-	}
+    throw new Catalogmissparam(null, "MISSING_PARAM relation");
+
+      try { // Use try-finally to ensure scan is closed
+          try {
+            pscan = new Scan(this);
+          }
+          catch (Exception e1) {
+            System.err.println ("Scan initialization failed: "+e1); // Improved error message
+            throw new RelCatalogException(e1, "scan failed");
+          }
+
+          while(true) {
+            try {
+              // Use the class member tuple (assuming okay for this context)
+              tuple = pscan.getNext(rid); // Pass initialized RID
+
+              // *** FIX 4: Correct end-of-scan handling ***
+              if (tuple == null) {
+                break; // End of scan, exit loop
+              }
+
+              // *** FIX 3: Set header before reading ***
+              try {
+                  // Use the schema defined in the RelCatalog constructor
+                  tuple.setHdr((short)5, attrs, str_sizes);
+              } catch (Exception e_hdr) {
+                  System.err.println("Failed to set tuple header in removeInfo: " + e_hdr);
+                  throw new RelCatalogException(e_hdr, "setHdr failed within removeInfo loop");
+              }
+
+              // Now read the tuple into the initialized record object
+              read_tuple(tuple, record);
+
+            }
+            catch (Exception e_loop) { // Catch errors from getNext/setHdr/read_tuple
+              System.err.println ("Error in removeInfo loop (getNext/setHdr/read_tuple): "+e_loop);
+              // e_loop.printStackTrace(); // Optional: print stack trace
+              throw new RelCatalogException(e_loop, "Error in removeInfo loop");
+            }
+
+            // Check if the current record matches
+            if (record.relName.equalsIgnoreCase(relation)==true) {
+              try {
+                deleteRecord(rid); // Delete the found record
+                found = true; // Mark as found
+                break; // Exit loop after deleting
+              }
+              catch (Exception e_del) {
+                System.err.println ("deleteRecord failed: "+e_del);
+                throw new RelCatalogException(e_del, "deleteRecord failed");
+              }
+            }
+          } // End while
+
+          // *** FIX 4 (cont.): Throw exception only if not found after scan ***
+          if (!found) {
+               throw new Catalogrelnotfound(null, "Catalog: Relation '" + relation + "' not found for removal!");
+          }
+          // If found and deleted, just return normally
+          return;
+
+      } finally {
+          // *** FIX 5: Ensure scan is always closed ***
+          if (pscan != null) {
+              pscan.closescan();
+          }
       }
     };
   

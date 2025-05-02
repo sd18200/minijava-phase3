@@ -50,6 +50,9 @@ public class Heapfile implements Filetype,  GlobalConst {
   private static int tempfilecount = 0;
   
   
+  public String get_fileName() {
+    return _fileName;
+}
   
   /* get a new datapage from the buffer manager and initialize dpinfo
      @param dpinfop the information in the new HFPage
@@ -914,21 +917,22 @@ public class Heapfile implements Filetype,  GlobalConst {
    * @exception HFDiskMgrException exception thrown from diskmgr layer
    * @exception IOException I/O errors
    */
-  public void deleteFile()  
-    throws InvalidSlotNumberException, 
-	   FileAlreadyDeletedException, 
-	   InvalidTupleSizeException, 
-	   HFBufMgrException,
-	   HFDiskMgrException,
-	   IOException
+  public void deleteFile()
+    throws InvalidSlotNumberException,
+           FileAlreadyDeletedException,
+           InvalidTupleSizeException,
+           HFBufMgrException,
+           HFDiskMgrException,
+           IOException
     {
-      if(_file_deleted ) 
-   	throw new FileAlreadyDeletedException(null, "file alread deleted");
-      
-      
+      if(_file_deleted )
+        throw new FileAlreadyDeletedException(null, "file alread deleted");
+
+      System.out.println("DEBUG: Heapfile.deleteFile() started for: " + _fileName); // ADDED
+
       // Mark the deleted flag (even if it doesn't get all the way done).
       _file_deleted = true;
-      
+
       // Deallocate all data pages
       PageId currentDirPageId = new PageId();
       currentDirPageId.pid = _firstDirPageId.pid;
@@ -937,40 +941,57 @@ public class Heapfile implements Filetype,  GlobalConst {
       Page pageinbuffer = new Page();
       HFPage currentDirPage =  new HFPage();
       Tuple atuple;
-      
+
+      // Need to handle the case where _firstDirPageId might be invalid if file creation failed partially
+      if (currentDirPageId == null || currentDirPageId.pid == INVALID_PAGE) {
+          System.out.println("DEBUG: Heapfile.deleteFile() - _firstDirPageId is invalid, attempting to delete file entry only.");
+          try {
+              delete_file_entry( _fileName );
+          } catch (Exception e) {
+               System.err.println("DEBUG: Heapfile.deleteFile() - Error deleting file entry when _firstDirPageId was invalid: " + e);
+          }
+          return; // Nothing more to deallocate
+      }
+
+
       pinPage(currentDirPageId, currentDirPage, false);
       //currentDirPage.openHFpage(pageinbuffer);
-      
+
       RID rid = new RID();
       while(currentDirPageId.pid != INVALID_PAGE)
-	{      
-	  for(rid = currentDirPage.firstRecord();
-	      rid != null;
-	      rid = currentDirPage.nextRecord(rid))
-	    {
-	      atuple = currentDirPage.getRecord(rid);
-	      DataPageInfo dpinfo = new DataPageInfo( atuple);
-	      //int dpinfoLen = arecord.length;
-	      
-	      freePage(dpinfo.pageId);
-	      
-	    }
-	  // ASSERTIONS:
-	  // - we have freePage()'d all data pages referenced by
-	  // the current directory page.
-	  
-	  nextDirPageId = currentDirPage.getNextPage();
-	  freePage(currentDirPageId);
-	  
-	  currentDirPageId.pid = nextDirPageId.pid;
-	  if (nextDirPageId.pid != INVALID_PAGE) 
-	    {
-	      pinPage(currentDirPageId, currentDirPage, false);
-	      //currentDirPage.openHFpage(pageinbuffer);
-	    }
-	}
-      
+        {
+          System.out.println("DEBUG: Heapfile.deleteFile() - Processing DirPage: " + currentDirPageId.pid); // ADDED
+          for(rid = currentDirPage.firstRecord();
+              rid != null;
+              rid = currentDirPage.nextRecord(rid))
+            {
+              atuple = currentDirPage.getRecord(rid);
+              DataPageInfo dpinfo = new DataPageInfo( atuple);
+              //int dpinfoLen = arecord.length;
+
+              System.out.println("DEBUG: Heapfile.deleteFile() - Freeing DataPage: " + dpinfo.pageId.pid); // ADDED
+              freePage(dpinfo.pageId);
+
+            }
+          // ASSERTIONS:
+          // - we have freePage()'d all data pages referenced by
+          // the current directory page.
+
+          nextDirPageId = currentDirPage.getNextPage();
+          System.out.println("DEBUG: Heapfile.deleteFile() - Freeing DirPage: " + currentDirPageId.pid); // ADDED
+          freePage(currentDirPageId); // This also unpins implicitly via BufMgr.freePage
+
+          currentDirPageId.pid = nextDirPageId.pid;
+          if (nextDirPageId.pid != INVALID_PAGE)
+            {
+              pinPage(currentDirPageId, currentDirPage, false);
+              //currentDirPage.openHFpage(pageinbuffer);
+            }
+        }
+
+      System.out.println("DEBUG: Heapfile.deleteFile() - Deleting file entry from DB directory: " + _fileName); // ADDED
       delete_file_entry( _fileName );
+      System.out.println("DEBUG: Heapfile.deleteFile() finished for: " + _fileName); // ADDED
     }
   
   /**

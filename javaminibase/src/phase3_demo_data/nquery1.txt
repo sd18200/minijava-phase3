@@ -1,1 +1,1 @@
-NN(2, target1, 5, **I**, 1, 2)
+NN(4, phase3_demo_data/target1.txt, 1, H, *)

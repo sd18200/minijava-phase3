@@ -153,8 +153,6 @@ public class DBInterface {
                             }
                         }
                         break;
-
-
                         
                     default:
                         System.out.println("Unknown command: " + command);
@@ -699,10 +697,64 @@ public class DBInterface {
                 scan.closescan();
                 scan = null;
 
-                // Build index file name and save
                 indexFileName = relationName + columnId + "_L" + lValue + "_h" + hValue + ".ser";
-                lshIndex.saveIndex(indexFileName);
-                System.out.println("LSH index structure saved to file: " + indexFileName);
+
+                String absolutePathToFile = null; // Store the absolute path
+
+                try {
+                    File testFileRelative = new File(indexFileName);
+                    absolutePathToFile = testFileRelative.getAbsolutePath(); // Get the absolute path
+                    System.out.println("DEBUG: Relative File object created for: " + indexFileName);
+                    System.out.println("DEBUG: Absolute path determined as: " + absolutePathToFile);
+
+                    // *** Use the absolute path for subsequent operations ***
+                    File testFileAbsolute = new File(absolutePathToFile);
+                    System.out.println("DEBUG: Absolute File object created for: " + absolutePathToFile);
+
+                    System.out.println("DEBUG: Parent directory (absolute): " + testFileAbsolute.getParent());
+                    File parentDir = testFileAbsolute.getParentFile();
+                    if (parentDir != null) {
+                        System.out.println("DEBUG: Parent exists: " + parentDir.exists());
+                        System.out.println("DEBUG: Parent is directory: " + parentDir.isDirectory());
+                        System.out.println("DEBUG: Parent can write: " + parentDir.canWrite());
+                    } else {
+                         File cwd = new File(".");
+                         System.out.println("DEBUG: Parent is null, checking CWD ("+ cwd.getAbsolutePath() +") can write: " + cwd.canWrite());
+                    }
+                    System.out.println("DEBUG: File (absolute) exists: " + testFileAbsolute.exists());
+                    if (testFileAbsolute.exists()) {
+                         System.out.println("DEBUG: Is directory: " + testFileAbsolute.isDirectory());
+                         System.out.println("DEBUG: Can write: " + testFileAbsolute.canWrite());
+                    }
+
+                    System.out.println("DEBUG: Attempting testFileAbsolute.createNewFile()...");
+                    if (testFileAbsolute.createNewFile()) {
+                        System.out.println("DEBUG: Successfully created empty test file (absolute): " + absolutePathToFile);
+                        testFileAbsolute.delete();
+                        System.out.println("DEBUG: Deleted empty test file (absolute).");
+                    } else {
+                        System.out.println("DEBUG: testFileAbsolute.createNewFile() returned false. Exists? " + testFileAbsolute.exists());
+                    }
+                } catch (IOException e_test) {
+                    System.err.println("DEBUG: IOException during test file creation/check for '" + absolutePathToFile + "': " + e_test.getMessage());
+                    e_test.printStackTrace();
+                } catch (SecurityException e_sec) {
+                     System.err.println("DEBUG: SecurityException during test file creation/check for '" + absolutePathToFile + "': " + e_sec.getMessage());
+                     e_sec.printStackTrace();
+                }
+
+                // *** Use the determined absolute path for saving ***
+                String finalPathToSave = (absolutePathToFile != null) ? absolutePathToFile : indexFileName;
+                System.out.println("DEBUG: Attempting to save LSH index to final path: '" + finalPathToSave + "'");
+                lshIndex.saveIndex(finalPathToSave); // Use the absolute path
+                System.out.println("LSH index structure saved to file: " + finalPathToSave);
+
+
+                // // Build index file name and save
+                // indexFileName = relationName + columnId + "_L" + lValue + "_h" + hValue + ".ser";
+                // System.out.println("DEBUG: Attempting to save LSH index to: '" + indexFileName + "'"); // <-- ADD THIS LINE
+                // lshIndex.saveIndex(indexFileName);
+                // System.out.println("LSH index structure saved to file: " + indexFileName);
 
             // --- B-Tree Index Creation ---
         } else if (indexTypeToCreate.indexType == IndexType.B_Index) {
@@ -796,10 +848,20 @@ public class DBInterface {
             indexDesc.clustered = 0; // Assuming non-clustered
             indexDesc.distinctKeys = 0; // Placeholder - could estimate later
             indexDesc.indexPages = 0;   // Placeholder - could estimate later
+            indexDesc.physicalFileName = indexFileName; // <-- STORE THE EXACT FILENAME
+
+
+            // --- DEBUG: Verify physicalFileName before adding to catalog ---
+            System.out.println("DEBUG: Catalog Add - Index Type: " + indexDesc.accessType.indexType +
+                               ", Attr: " + indexDesc.attrName +
+                               ", Physical File: " + indexDesc.physicalFileName);
+            // --- END DEBUG ---
+
+
 
             if (ExtendedSystemDefs.MINIBASE_INDCAT == null) {
                 System.err.println("CRITICAL ERROR: ExtendedSystemDefs.MINIBASE_INDCAT is NULL before calling addIndexCatalogEntry!");
-                throw new NullPointerException("MINIBASE_INDCAT is null. Catalog initialization likely failed.");
+                throw new NullPointerException("MINIBASE_INDCAT is null. Catalog initialization likely failed.");     
             }
 
 
@@ -817,6 +879,17 @@ public class DBInterface {
             ExtendedSystemDefs.MINIBASE_ATTRCAT.removeInfo(relationName, attrName);
             ExtendedSystemDefs.MINIBASE_ATTRCAT.addInfo(attrToUpdate);
             System.out.println("DEBUG: Attribute catalog updated.");
+
+
+            System.out.println("DEBUG: Updating relation catalog index count...");
+            RelDesc relDescToUpdate = new RelDesc();
+            ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(relationName, relDescToUpdate);
+            relDescToUpdate.indexCnt++; // Increment index count
+            // Remove old entry and add updated entry
+            ExtendedSystemDefs.MINIBASE_RELCAT.removeInfo(relationName);
+            ExtendedSystemDefs.MINIBASE_RELCAT.addInfo(relDescToUpdate);
+            System.out.println("DEBUG: Relation catalog updated.");
+
 
 
             // --- 6. Report Success ---
@@ -853,13 +926,19 @@ public class DBInterface {
             System.out.println("Error: No database is open. Please open a database first.");
             return;
         }
-        
+
         System.out.println("Batch inserting data into table '" + relationName + "' from file " + updateFileName + "...");
         PCounter.initialize(); // Reset counters for this operation
-        
+
         BufferedReader reader = null;
         Heapfile heapFile = null;
-        
+        // *** BATCHING: Map to hold loaded LSH indexes ***
+        Map<String, LSHFIndex> loadedLSHIndexes = new HashMap<>();
+        // *** BATCHING: Map to hold LSH index filename -> attribute number mapping ***
+        Map<String, Integer> lshIndexAttrMap = new HashMap<>();
+        // *** BATCHING: Map to hold BTreeFile instances ***
+        Map<String, BTreeFile> openBTreeFiles = new HashMap<>();
+
         try {
             // Check if relation exists & get relation descriptor
             RelDesc relDesc = new RelDesc();
@@ -868,30 +947,30 @@ public class DBInterface {
             } catch (Exception e) {
                 throw new Exception("Relation " + relationName + " does not exist");
             }
-            
+
             // Open update file
             reader = new BufferedReader(new FileReader(updateFileName));
-            
+
             // Read the number of attributes
             int attrCount = Integer.parseInt(reader.readLine().trim());
             if (attrCount != relDesc.attrCnt) {
-                throw new Exception("Attribute count mismatch: update file has " + attrCount + 
+                throw new Exception("Attribute count mismatch: update file has " + attrCount +
                                     " attributes but relation has " + relDesc.attrCnt);
             }
-            
+
             // Read the attribute types
             String[] typeStrs = reader.readLine().trim().split("\\s+");
             if (typeStrs.length != attrCount) {
                 throw new Exception("Mismatch between attribute count and type count in update file");
             }
-            
+
             // Get attribute descriptors from the catalog
             AttrDesc[] attrDescs = new AttrDesc[relDesc.attrCnt];
             for (int i = 0; i < relDesc.attrCnt; i++) {
                 attrDescs[i] = new AttrDesc();
             }
             ExtendedSystemDefs.MINIBASE_ATTRCAT.getRelInfo(relationName, relDesc.attrCnt, attrDescs);
-            
+
             // Prepare schema information
             AttrType[] attrTypes = new AttrType[relDesc.attrCnt];
             int strCount = 0;
@@ -900,7 +979,7 @@ public class DBInterface {
                 if (attrTypes[i].attrType == AttrType.attrString) {
                     strCount++;
                 }
-                
+
                 // Verify that provided types match the schema
                 int fileType = Integer.parseInt(typeStrs[i]);
                 int expectedType;
@@ -911,12 +990,12 @@ public class DBInterface {
                     case AttrType.attrVector100D: expectedType = 4; break;
                     default: expectedType = -1;
                 }
-                
+
                 if (fileType != expectedType) {
                     throw new Exception("Type mismatch for attribute " + (i+1) + ": expected " + expectedType + " but got " + fileType);
                 }
             }
-            
+
             // Create string sizes array
             short[] strSizes = new short[strCount];
             int strIndex = 0;
@@ -925,12 +1004,9 @@ public class DBInterface {
                     strSizes[strIndex++] = (short) attrDescs[i].attrLen;
                 }
             }
-            
-            // Get indexes for this relation using the correct approach:
-            // 1. First get the index count from the relation descriptor
+
+            // Get indexes for this relation
             int indexCount = relDesc.indexCnt;
-            
-            // 2. Create and populate index descriptors if any indexes exist
             IndexDesc[] indexDescs = null;
             if (indexCount > 0) {
                 indexDescs = new IndexDesc[indexCount];
@@ -938,22 +1014,78 @@ public class DBInterface {
                     indexDescs[i] = new IndexDesc();
                 }
                 try {
-                    // Use proper catalog method to get index information
                     ExtendedSystemDefs.MINIBASE_INDCAT.getRelInfo(relationName, indexCount, indexDescs);
+                    System.out.println("DEBUG: BatchInsert - Retrieved Index Catalog Info:");
+                    for (IndexDesc id : indexDescs) {
+                        System.out.println("  Attr: " + id.attrName +
+                                           ", Type: " + id.accessType.indexType +
+                                           ", File: " + id.physicalFileName);
+
+                        // *** BATCHING: Pre-load LSH indexes and open BTree files ***
+                        int indexAttrPos = -1;
+                        for (int j = 0; j < relDesc.attrCnt; j++) {
+                            if (attrDescs[j].attrName.equals(id.attrName)) {
+                                indexAttrPos = j + 1; // 1-based
+                                break;
+                            }
+                        }
+                        if (indexAttrPos == -1) {
+                             System.err.println("Warning: Could not find attribute position for index: " + id.attrName);
+                             continue;
+                        }
+
+                        if (id.accessType.indexType == IndexType.LSHFIndex) {
+                            String indexFileName = id.physicalFileName;
+                            if (indexFileName != null && !indexFileName.isEmpty()) {
+                                File indexFile = new File(indexFileName);
+                                if (indexFile.exists()) {
+                                    try {
+                                        LSHFIndex lshIndex = LSHFIndex.loadIndex(indexFileName);
+                                        loadedLSHIndexes.put(indexFileName, lshIndex);
+                                        lshIndexAttrMap.put(indexFileName, indexAttrPos);
+                                        System.out.println("DEBUG: Pre-loaded LSH index: " + indexFileName);
+                                    } catch (Exception e_load) {
+                                        System.err.println("Warning: Failed to pre-load LSH index '" + indexFileName + "': " + e_load.getMessage());
+                                    }
+                                } else {
+                                    System.err.println("Warning: LSH index file specified in catalog not found: " + indexFileName);
+                                }
+                            } else {
+                                System.err.println("Warning: LSH index entry found but physical file name is missing for " + id.attrName);
+                            }
+                        } else if (id.accessType.indexType == IndexType.B_Index) {
+                            String btreeFileName = ExtendedSystemDefs.MINIBASE_INDCAT.buildIndexName(
+                                relationName, id.attrName, id.accessType);
+                            if (btreeFileName != null && !btreeFileName.isEmpty()) {
+                                try {
+                                    BTreeFile btf = new BTreeFile(btreeFileName);
+                                    openBTreeFiles.put(btreeFileName, btf);
+                                    System.out.println("DEBUG: Pre-opened BTree file: " + btreeFileName);
+                                } catch (Exception e_open) {
+                                    System.err.println("Warning: Failed to pre-open BTree file '" + btreeFileName + "': " + e_open.getMessage());
+                                }
+                            }
+                        }
+                        // *** END BATCHING PRE-LOAD/OPEN ***
+                    }
                 } catch (Exception e) {
-                    System.err.println("Warning: Failed to retrieve index information: " + e.getMessage());
+                    System.err.println("Warning: Failed to retrieve or process index information: " + e.getMessage());
                     indexCount = 0;
                     indexDescs = null;
+                    // Clear maps if index info failed
+                    loadedLSHIndexes.clear();
+                    lshIndexAttrMap.clear();
+                    openBTreeFiles.clear();
                 }
             }
-            
+
             // Open heap file
             heapFile = new Heapfile(relationName);
-            
+
             // Read and insert tuples
             String line;
             int insertedCount = 0;
-            
+
             while (true) {
                 // Create a new tuple for insertion
                 Tuple tuple = new Tuple();
@@ -962,9 +1094,9 @@ public class DBInterface {
                 byte[] tupleData = new byte[tupleSize];
                 tuple = new Tuple(tupleData, 0, tupleSize);
                 tuple.setHdr((short) attrCount, attrTypes, strSizes);
-                
+
                 boolean endOfFile = false;
-                
+
                 // Read a tuple worth of data
                 for (int i = 0; i < attrCount; i++) {
                     line = reader.readLine();
@@ -972,42 +1104,27 @@ public class DBInterface {
                         endOfFile = true;
                         break;
                     }
-                    
                     line = line.trim();
-                    
                     try {
                         switch (attrTypes[i].attrType) {
                             case AttrType.attrInteger:
-                                int intVal = Integer.parseInt(line);
-                                tuple.setIntFld(i+1, intVal);
+                                tuple.setIntFld(i+1, Integer.parseInt(line));
                                 break;
-                                
                             case AttrType.attrReal:
-                                float floatVal = Float.parseFloat(line);
-                                tuple.setFloFld(i+1, floatVal);
+                                tuple.setFloFld(i+1, Float.parseFloat(line));
                                 break;
-                                
                             case AttrType.attrString:
                                 tuple.setStrFld(i+1, line);
                                 break;
-                                
                             case AttrType.attrVector100D:
-                                // Parse a line of 100 integers for the vector
                                 String[] vectorVals = line.split("\\s+");
-                                if (vectorVals.length != 100) {
-                                    throw new Exception("Vector must have exactly 100 values");
-                                }
-                                
+                                if (vectorVals.length != 100) throw new Exception("Vector must have exactly 100 values");
                                 int[] vector = new int[100];
                                 for (int j = 0; j < 100; j++) {
-                                    int val = Integer.parseInt(vectorVals[j]);
-                                    // Check range constraint (-10000 to 10000)
-                                    if (val < -10000 || val > 10000) {
-                                        throw new Exception("Vector values must be in range -10000 to 10000");
-                                    }
-                                    vector[j] = val;
+                                    float floatVal2 = Float.parseFloat(vectorVals[j]);
+                                    vector[j] = (int) floatVal2;
+                                    if (vector[j] < -10000 || vector[j] > 10000) throw new Exception("Vector values must be in range -10000 to 10000");
                                 }
-                                
                                 tuple.setVectorFld(i+1, vector);
                                 break;
                         }
@@ -1015,121 +1132,97 @@ public class DBInterface {
                         throw new Exception("Error parsing attribute " + (i+1) + ": " + e.getMessage());
                     }
                 }
-                
-                // If we reached end of file before completing a tuple, break the loop
-                if (endOfFile) {
-                    break;
-                }
-                
+
+                if (endOfFile) break; // Exit loop if EOF reached
+
                 // Insert the tuple into the heap file
                 RID rid = heapFile.insertRecord(tuple.getTupleByteArray());
                 insertedCount++;
-                
-                // Update all indexes
+
+                // *** BATCHING: Update IN-MEMORY indexes ***
                 if (indexDescs != null && indexCount > 0) {
                     for (int i = 0; i < indexCount; i++) {
                         IndexDesc indexDesc = indexDescs[i];
-                        
-                        // Find the attribute number for this index
                         int indexAttrPos = -1;
                         for (int j = 0; j < relDesc.attrCnt; j++) {
                             if (attrDescs[j].attrName.equals(indexDesc.attrName)) {
-                                indexAttrPos = j + 1; // Convert to 1-based position
-                                break;
+                                indexAttrPos = j + 1; break;
                             }
                         }
-                        
-                        if (indexAttrPos == -1) {
-                            System.err.println("Warning: Could not find attribute for index: " + indexDesc.attrName);
-                            continue;
-                        }
-                        
-                        // Update the index based on its type
+                        if (indexAttrPos == -1) continue; // Skip if attribute not found
+
+                        // Update BTree index (using pre-opened file)
                         if (indexDesc.accessType.indexType == IndexType.B_Index) {
-                            // BTree index
-                            BTreeFile btf = null;
-                            try {
-                                // Format: relationName + columnId + ".btree"
-                                // Note: We use indCat.buildIndexName() method to get the correct name
-                                String btreeFileName = ExtendedSystemDefs.MINIBASE_INDCAT.buildIndexName(
-                                    relationName, indexDesc.attrName, indexDesc.accessType);
-                                    
-                                btf = new BTreeFile(btreeFileName);
-                                
-                                // Extract key from tuple based on attribute type
-                                KeyClass key = null;
-                                switch (attrTypes[indexAttrPos-1].attrType) {
-                                    case AttrType.attrInteger:
-                                        key = new IntegerKey(tuple.getIntFld(indexAttrPos));
-                                        break;
-                                    case AttrType.attrReal:
-                                        // Convert float to string for BTree
-                                        key = new IntegerKey((int)tuple.getFloFld(indexAttrPos));
-                                        break;
-                                    case AttrType.attrString:
-                                        key = new StringKey(tuple.getStrFld(indexAttrPos));
-                                        break;
-                                    default:
-                                        throw new Exception("Unsupported attribute type for BTree index: " + 
-                                                          attrTypes[indexAttrPos-1].attrType);
-                                }
-                                
-                                // Insert into BTree
-                                btf.insert(key, rid);
-                            } catch (Exception e) {
-                                System.err.println("Warning: Error updating BTree index: " + e.getMessage());
-                            } finally {
-                                // Close BTree file if opened
-                                if (btf != null) {
-                                    try { btf.close(); } catch (Exception e) { /* Ignore */ }
-                                }
-                            }
-                        } else if (indexDesc.accessType.indexType == IndexType.LSHFIndex) {
-                            try {
-                                // Find the LSH index files that match this relation and column
-                                // Format from createIndex: relationName + "." + columnId + "." + lValue + "." + hValue + ".ser"
-                                File dir = new File(".");
-                                // **FIX: Correct the prefix to match the createIndex naming convention**
-                                // The prefix should be "RELNAME.COLUMNID." to find files like "REL1.2.10.5.ser"
-                                String prefix = relationName + "." + indexAttrPos + ".";
-                                File[] matchingFiles = dir.listFiles((d, name) ->
-                                    name.startsWith(prefix) && name.endsWith(".ser"));
-
-                                if (matchingFiles != null && matchingFiles.length > 0) {
-                                    for (File indexFile : matchingFiles) {
-                                        String indexFileName = indexFile.getName();
-
-                                        // Load the LSH index
-                                        LSHFIndex lshIndex = LSHFIndex.loadIndex(indexFileName);
-
-                                        // Extract vector data from tuple
-                                        int[] vectorData = tuple.getVectorFld(indexAttrPos);
-                                        Vector100Dtype vectorObj = new Vector100Dtype(vectorData);
-                                        Vector100DKey key = new Vector100DKey(vectorObj);
-
-                                        // Insert into LSH index
-                                        lshIndex.insert(key, new RID(rid.pageNo, rid.slotNo));
-
-                                        // Save the updated index
-                                        lshIndex.saveIndex(indexFileName);
+                            String btreeFileName = ExtendedSystemDefs.MINIBASE_INDCAT.buildIndexName(
+                                relationName, indexDesc.attrName, indexDesc.accessType);
+                            BTreeFile btf = openBTreeFiles.get(btreeFileName);
+                            if (btf != null) {
+                                try {
+                                    KeyClass key = null;
+                                    switch (attrTypes[indexAttrPos-1].attrType) {
+                                        case AttrType.attrInteger:
+                                            key = new IntegerKey(tuple.getIntFld(indexAttrPos)); break;
+                                        case AttrType.attrReal:
+                                            key = new IntegerKey((int)tuple.getFloFld(indexAttrPos)); break;
+                                        case AttrType.attrString:
+                                            key = new StringKey(tuple.getStrFld(indexAttrPos)); break;
                                     }
-                                } else {
-                                     // Optional: Add a warning if no index file was found for an expected index
-                                     System.err.println("Warning: No LSH index file found matching prefix '" + prefix + "' for relation '" + relationName + "' attribute " + indexAttrPos);
+                                    if (key != null) {
+                                        btf.insert(key, rid);
+                                    }
+                                } catch (Exception e) {
+                                    System.err.println("Warning: Error updating BTree index '" + btreeFileName + "': " + e.getMessage());
+                                    // Consider closing/removing this btf from map if errors persist?
                                 }
-                            } catch (Exception e) {
-                                System.err.println("Warning: Error updating LSH index: " + e.getMessage());
+                            } else {
+                                 System.err.println("Warning: BTree file '" + btreeFileName + "' was not pre-opened successfully. Skipping update.");
                             }
                         }
-                    }
+                        // Update LSH index (in-memory object)
+                        else if (indexDesc.accessType.indexType == IndexType.LSHFIndex) {
+                            String indexFileName = indexDesc.physicalFileName;
+                            LSHFIndex lshIndex = loadedLSHIndexes.get(indexFileName);
+                            Integer mappedAttrPos = lshIndexAttrMap.get(indexFileName);
+
+                            if (lshIndex != null && mappedAttrPos != null && mappedAttrPos == indexAttrPos) {
+                                try {
+                                    int[] vectorData = tuple.getVectorFld(indexAttrPos);
+                                    Vector100Dtype vectorObj = new Vector100Dtype(vectorData);
+                                    Vector100DKey key = new Vector100DKey(vectorObj);
+                                    lshIndex.insert(key, new RID(rid.pageNo, rid.slotNo)); // Use a copy of RID
+                                } catch (Exception e) {
+                                    System.err.println("Warning: Error updating in-memory LSH index '" + indexFileName + "': " + e.getMessage());
+                                    // Consider removing this index from map if errors persist?
+                                }
+                            } else if (indexFileName != null) {
+                                 System.err.println("Warning: LSH index '" + indexFileName + "' was not pre-loaded successfully or attribute mismatch. Skipping update.");
+                            }
+                        }
+                    } // End loop through indexDescs
+                } // End if indexes exist
+                // *** END BATCHING UPDATE ***
+            } // End while(true) loop for reading file
+
+            // *** BATCHING: Save updated LSH indexes ***
+            System.out.println("DEBUG: Saving updated LSH indexes...");
+            for (Map.Entry<String, LSHFIndex> entry : loadedLSHIndexes.entrySet()) {
+                String filename = entry.getKey();
+                LSHFIndex index = entry.getValue();
+                try {
+                    index.saveIndex(filename);
+                    System.out.println("DEBUG: Saved LSH index: " + filename);
+                } catch (IOException e_save) {
+                    System.err.println("ERROR: Failed to save updated LSH index '" + filename + "': " + e_save.getMessage());
+                    // Decide how critical this is - maybe throw exception?
                 }
             }
-            
+            // *** END BATCHING SAVE ***
+
             // Report success and statistics
             System.out.println("Successfully inserted " + insertedCount + " tuples into relation '" + relationName + "'.");
             System.out.println("Page reads: " + PCounter.getRCount());
             System.out.println("Page writes: " + PCounter.getWCount());
-            
+
         } catch (Exception e) {
             System.err.println("Error batch inserting data: " + e.getMessage());
             e.printStackTrace();
@@ -1139,6 +1232,16 @@ public class DBInterface {
             if (reader != null) {
                 try { reader.close(); } catch (Exception e) { /* Ignore */ }
             }
+            // *** BATCHING: Close BTree files ***
+            for (Map.Entry<String, BTreeFile> entry : openBTreeFiles.entrySet()) {
+                try {
+                    entry.getValue().close();
+                    System.out.println("DEBUG: Closed BTree file: " + entry.getKey());
+                } catch (Exception e_close) {
+                    System.err.println("Warning: Failed to close BTree file '" + entry.getKey() + "': " + e_close.getMessage());
+                }
+            }
+            // No need to explicitly close LSH indexes here
         }
     }
 
@@ -1155,14 +1258,20 @@ private static void batchDelete(String updateFileName, String relationName) thro
         System.out.println("Error: No database is open. Please open a database first.");
         return;
     }
-    
+
     System.out.println("Batch deleting data from table '" + relationName + "' using file " + updateFileName + "...");
     PCounter.initialize(); // Reset counters for this operation
-    
+
     BufferedReader reader = null;
     Heapfile heapFile = null;
     Scan scan = null;
-    
+    // *** BATCHING: Map to hold loaded LSH indexes ***
+    Map<String, LSHFIndex> loadedLSHIndexes = new HashMap<>();
+    // *** BATCHING: Map to hold LSH index filename -> attribute number mapping ***
+    Map<String, Integer> lshIndexAttrMap = new HashMap<>();
+    // *** BATCHING: Map to hold BTreeFile instances ***
+    Map<String, BTreeFile> openBTreeFiles = new HashMap<>();
+
     try {
         // Check if relation exists & get relation descriptor
         RelDesc relDesc = new RelDesc();
@@ -1171,30 +1280,30 @@ private static void batchDelete(String updateFileName, String relationName) thro
         } catch (Exception e) {
             throw new Exception("Relation " + relationName + " does not exist");
         }
-        
+
         // Open the update file
         reader = new BufferedReader(new FileReader(updateFileName));
-        
+
         // Read the number of attributes
         int attrCount = Integer.parseInt(reader.readLine().trim());
         if (attrCount != relDesc.attrCnt) {
-            throw new Exception("Attribute count mismatch: update file has " + attrCount + 
+            throw new Exception("Attribute count mismatch: update file has " + attrCount +
                                 " attributes but relation has " + relDesc.attrCnt);
         }
-        
+
         // Read the attribute types
         String[] typeStrs = reader.readLine().trim().split("\\s+");
         if (typeStrs.length != attrCount) {
             throw new Exception("Mismatch between attribute count and type count in update file");
         }
-        
+
         // Get attribute descriptors from the catalog
         AttrDesc[] attrDescs = new AttrDesc[relDesc.attrCnt];
         for (int i = 0; i < relDesc.attrCnt; i++) {
             attrDescs[i] = new AttrDesc();
         }
         ExtendedSystemDefs.MINIBASE_ATTRCAT.getRelInfo(relationName, relDesc.attrCnt, attrDescs);
-        
+
         // Prepare schema information
         AttrType[] attrTypes = new AttrType[relDesc.attrCnt];
         int strCount = 0;
@@ -1203,8 +1312,7 @@ private static void batchDelete(String updateFileName, String relationName) thro
             if (attrTypes[i].attrType == AttrType.attrString) {
                 strCount++;
             }
-            
-            // Verify that provided types match the schema
+            // Verify types match
             int fileType = Integer.parseInt(typeStrs[i]);
             int expectedType;
             switch (attrTypes[i].attrType) {
@@ -1214,13 +1322,10 @@ private static void batchDelete(String updateFileName, String relationName) thro
                 case AttrType.attrVector100D: expectedType = 4; break;
                 default: expectedType = -1;
             }
-            
             if (fileType != expectedType) {
                 throw new Exception("Type mismatch for attribute " + (i+1) + ": expected " + expectedType + " but got " + fileType);
             }
         }
-        
-        // Create string sizes array
         short[] strSizes = new short[strCount];
         int strIndex = 0;
         for (int i = 0; i < relDesc.attrCnt; i++) {
@@ -1228,7 +1333,7 @@ private static void batchDelete(String updateFileName, String relationName) thro
                 strSizes[strIndex++] = (short) attrDescs[i].attrLen;
             }
         }
-        
+
         // Get indexes for this relation
         int indexCount = relDesc.indexCnt;
         IndexDesc[] indexDescs = null;
@@ -1239,301 +1344,275 @@ private static void batchDelete(String updateFileName, String relationName) thro
             }
             try {
                 ExtendedSystemDefs.MINIBASE_INDCAT.getRelInfo(relationName, indexCount, indexDescs);
+                System.out.println("DEBUG: BatchDelete - Retrieved Index Catalog Info:");
+                for (IndexDesc id : indexDescs) {
+                    System.out.println("  Attr: " + id.attrName +
+                                       ", Type: " + id.accessType.indexType +
+                                       ", File: " + id.physicalFileName);
+
+                    // *** BATCHING: Pre-load LSH indexes and open BTree files ***
+                    int indexAttrPos = -1;
+                    for (int j = 0; j < relDesc.attrCnt; j++) {
+                        if (attrDescs[j].attrName.equals(id.attrName)) {
+                            indexAttrPos = j + 1; break; // 1-based
+                        }
+                    }
+                     if (indexAttrPos == -1) {
+                         System.err.println("Warning: Could not find attribute position for index: " + id.attrName);
+                         continue;
+                     }
+
+                    if (id.accessType.indexType == IndexType.LSHFIndex) {
+                        String indexFileName = id.physicalFileName;
+                        if (indexFileName != null && !indexFileName.isEmpty()) {
+                            File indexFile = new File(indexFileName);
+                            if (indexFile.exists()) {
+                                try {
+                                    LSHFIndex lshIndex = LSHFIndex.loadIndex(indexFileName);
+                                    loadedLSHIndexes.put(indexFileName, lshIndex);
+                                    lshIndexAttrMap.put(indexFileName, indexAttrPos);
+                                    System.out.println("DEBUG: Pre-loaded LSH index: " + indexFileName);
+                                } catch (Exception e_load) {
+                                    System.err.println("Warning: Failed to pre-load LSH index '" + indexFileName + "': " + e_load.getMessage());
+                                }
+                            } else {
+                                System.err.println("Warning: LSH index file specified in catalog not found: " + indexFileName);
+                            }
+                        } else {
+                            System.err.println("Warning: LSH index entry found but physical file name is missing for " + id.attrName);
+                        }
+                    } else if (id.accessType.indexType == IndexType.B_Index) {
+                        String btreeFileName = ExtendedSystemDefs.MINIBASE_INDCAT.buildIndexName(
+                            relationName, id.attrName, id.accessType);
+                        if (btreeFileName != null && !btreeFileName.isEmpty()) {
+                            try {
+                                BTreeFile btf = new BTreeFile(btreeFileName);
+                                openBTreeFiles.put(btreeFileName, btf);
+                                System.out.println("DEBUG: Pre-opened BTree file: " + btreeFileName);
+                            } catch (Exception e_open) {
+                                System.err.println("Warning: Failed to pre-open BTree file '" + btreeFileName + "': " + e_open.getMessage());
+                            }
+                        }
+                    }
+                    // *** END BATCHING PRE-LOAD/OPEN ***
+                }
             } catch (Exception e) {
-                System.err.println("Warning: Failed to retrieve index information: " + e.getMessage());
+                System.err.println("Warning: Failed to retrieve or process index information: " + e.getMessage());
                 indexCount = 0;
                 indexDescs = null;
+                loadedLSHIndexes.clear();
+                lshIndexAttrMap.clear();
+                openBTreeFiles.clear();
             }
         }
-        
+
         // Open heap file
         heapFile = new Heapfile(relationName);
-        
+
         // Read deletion conditions from the file
         List<DeletionCondition> conditions = new ArrayList<>();
         String line;
         while ((line = reader.readLine()) != null) {
             line = line.trim();
             if (line.isEmpty()) continue;
-            
-            String[] parts = line.split("\\s+", 2); // Split into two parts: attr_num and value
-            if (parts.length < 2) {
-                throw new Exception("Invalid deletion condition format: " + line);
-            }
-            
+            String[] parts = line.split("\\s+", 2);
+            if (parts.length < 2) throw new Exception("Invalid deletion condition format: " + line);
             int attrNum = Integer.parseInt(parts[0]);
-            if (attrNum < 1 || attrNum > attrCount) {
-                throw new Exception("Invalid attribute number in deletion condition: " + attrNum);
-            }
-            
-            // Convert to 0-based for internal use
+            if (attrNum < 1 || attrNum > attrCount) throw new Exception("Invalid attribute number in deletion condition: " + attrNum);
             int attrPos = attrNum - 1;
-            
-            // Create appropriate condition value based on attribute type
             DeletionCondition condition = new DeletionCondition();
             condition.attrNum = attrNum;
-            
             switch (attrTypes[attrPos].attrType) {
                 case AttrType.attrInteger:
                     condition.type = DeletionCondition.TYPE_INT;
-                    condition.intValue = Integer.parseInt(parts[1]);
-                    break;
-                    
+                    condition.intValue = Integer.parseInt(parts[1]); break;
                 case AttrType.attrReal:
                     condition.type = DeletionCondition.TYPE_FLOAT;
-                    condition.floatValue = Float.parseFloat(parts[1]);
-                    break;
-                    
+                    condition.floatValue = Float.parseFloat(parts[1]); break;
                 case AttrType.attrString:
                     condition.type = DeletionCondition.TYPE_STRING;
-                    condition.stringValue = parts[1];
-                    break;
-                    
+                    condition.stringValue = parts[1]; break;
                 case AttrType.attrVector100D:
                     condition.type = DeletionCondition.TYPE_VECTOR;
                     String[] vectorValues = parts[1].split("\\s+");
-                    if (vectorValues.length != 100) {
-                        throw new Exception("Vector must have exactly 100 values");
-                    }
-                    
+                    if (vectorValues.length != 100) throw new Exception("Vector must have exactly 100 values");
                     int[] vector = new int[100];
                     for (int i = 0; i < 100; i++) {
-                        int val = Integer.parseInt(vectorValues[i]);
-                        // Check range constraint (-10000 to 10000)
-                        if (val < -10000 || val > 10000) {
-                            throw new Exception("Vector values must be in range -10000 to 10000");
-                        }
-                        vector[i] = val;
+                        float floatVal = Float.parseFloat(vectorValues[i]);
+                        vector[i] = (int) floatVal;
+                        if (vector[i] < -10000 || vector[i] > 10000) throw new Exception("Vector values must be in range -10000 to 10000");
                     }
-                    condition.vectorValue = vector;
-                    break;
-                    
-                default:
-                    throw new Exception("Unsupported attribute type for deletion condition");
+                    condition.vectorValue = vector; break;
+                default: throw new Exception("Unsupported attribute type for deletion condition");
             }
-            
             conditions.add(condition);
         }
-        
-        // If no conditions were found, warn and exit
         if (conditions.isEmpty()) {
             System.out.println("Warning: No deletion conditions found in file. No records will be deleted.");
             return;
         }
-        
+
         // Scan the heap file for matching records to delete
         scan = heapFile.openScan();
         RID rid = new RID();
         Tuple tuple = null;
         int deletedCount = 0;
         List<RID> toDelete = new ArrayList<>();
-        Map<RID, Map<Integer, Object>> keysToDelete = new HashMap<>();
-        
+        Map<RID, Map<Integer, Object>> keysToDelete = new HashMap<>(); // Store keys BEFORE deletion
+
         // First scan: Find all records that match the conditions and prepare for deletion
         while ((tuple = scan.getNext(rid)) != null) {
-            // Deep copy the RID since it's reused by scan.getNext()
             RID ridCopy = new RID(rid.pageNo, rid.slotNo);
-            
-            // Set header to properly interpret tuple data
             tuple.setHdr((short)attrTypes.length, attrTypes, strSizes);
-            
-            // Check if this tuple matches any deletion condition
+
             for (DeletionCondition condition : conditions) {
                 boolean matches = false;
-                
                 try {
                     switch (condition.type) {
-                        case DeletionCondition.TYPE_INT:
-                            matches = (tuple.getIntFld(condition.attrNum) == condition.intValue);
-                            break;
-                            
-                        case DeletionCondition.TYPE_FLOAT:
-                            matches = (tuple.getFloFld(condition.attrNum) == condition.floatValue);
-                            break;
-                            
-                        case DeletionCondition.TYPE_STRING:
-                            matches = tuple.getStrFld(condition.attrNum).equals(condition.stringValue);
-                            break;
-                            
-                        case DeletionCondition.TYPE_VECTOR:
-                            int[] tupleVector = tuple.getVectorFld(condition.attrNum);
-                            matches = Arrays.equals(tupleVector, condition.vectorValue);
-                            break;
+                        case DeletionCondition.TYPE_INT: matches = (tuple.getIntFld(condition.attrNum) == condition.intValue); break;
+                        case DeletionCondition.TYPE_FLOAT: matches = (tuple.getFloFld(condition.attrNum) == condition.floatValue); break;
+                        case DeletionCondition.TYPE_STRING: matches = tuple.getStrFld(condition.attrNum).equals(condition.stringValue); break;
+                        case DeletionCondition.TYPE_VECTOR: matches = Arrays.equals(tuple.getVectorFld(condition.attrNum), condition.vectorValue); break;
                     }
                 } catch (Exception e) {
-                    System.err.println("Warning: Error checking condition on tuple: " + e.getMessage());
-                    continue;
+                    System.err.println("Warning: Error checking condition on tuple: " + e.getMessage()); continue;
                 }
-                
+
                 if (matches) {
-                    // If we have indexes, store the key values for index updates
+                    // Store keys for index updates BEFORE adding to delete list
                     if (indexDescs != null && indexCount > 0) {
                         Map<Integer, Object> keyValues = new HashMap<>();
-                        
                         for (int i = 0; i < indexCount; i++) {
                             IndexDesc indexDesc = indexDescs[i];
-                            
-                            // Find the attribute position for this index
                             int indexAttrPos = -1;
                             for (int j = 0; j < relDesc.attrCnt; j++) {
                                 if (attrDescs[j].attrName.equals(indexDesc.attrName)) {
-                                    indexAttrPos = j + 1; // Convert to 1-based
-                                    break;
+                                    indexAttrPos = j + 1; break;
                                 }
                             }
-                            
                             if (indexAttrPos == -1) continue;
-                            
-                            // Extract and store key value based on attribute type
                             try {
                                 switch (attrTypes[indexAttrPos-1].attrType) {
-                                    case AttrType.attrInteger:
-                                        keyValues.put(indexAttrPos, tuple.getIntFld(indexAttrPos));
-                                        break;
-                                    case AttrType.attrReal:
-                                        keyValues.put(indexAttrPos, tuple.getFloFld(indexAttrPos));
-                                        break;
-                                    case AttrType.attrString:
-                                        keyValues.put(indexAttrPos, tuple.getStrFld(indexAttrPos));
-                                        break;
-                                    case AttrType.attrVector100D:
-                                        keyValues.put(indexAttrPos, tuple.getVectorFld(indexAttrPos));
-                                        break;
+                                    case AttrType.attrInteger: keyValues.put(indexAttrPos, tuple.getIntFld(indexAttrPos)); break;
+                                    case AttrType.attrReal: keyValues.put(indexAttrPos, tuple.getFloFld(indexAttrPos)); break;
+                                    case AttrType.attrString: keyValues.put(indexAttrPos, tuple.getStrFld(indexAttrPos)); break;
+                                    case AttrType.attrVector100D: keyValues.put(indexAttrPos, tuple.getVectorFld(indexAttrPos)); break;
                                 }
                             } catch (Exception e) {
                                 System.err.println("Warning: Error extracting key value: " + e.getMessage());
                             }
                         }
-                        
                         keysToDelete.put(ridCopy, keyValues);
                     }
-                    
                     toDelete.add(ridCopy);
-                    break; // Once a condition matches, we can stop checking
+                    break; // Found a match, no need to check other conditions for this tuple
                 }
             }
         }
-        
-        // Close the scan
         scan.closescan();
         scan = null;
-        
-        // Delete the matching records
+
+        // Delete the matching records and update indexes
         for (RID deleteRid : toDelete) {
             try {
-                // Delete the record from the heap file
-                heapFile.deleteRecord(deleteRid);
-                deletedCount++;
-                
-                // Update indexes if needed
+                // *** BATCHING: Update IN-MEMORY indexes BEFORE deleting from heap ***
                 if (indexDescs != null && indexCount > 0) {
                     Map<Integer, Object> keyValues = keysToDelete.get(deleteRid);
-                    
-                    for (int i = 0; i < indexCount; i++) {
-                        IndexDesc indexDesc = indexDescs[i];
-                        
-                        // Find the attribute position for this index
-                        int indexAttrPos = -1;
-                        for (int j = 0; j < relDesc.attrCnt; j++) {
-                            if (attrDescs[j].attrName.equals(indexDesc.attrName)) {
-                                indexAttrPos = j + 1; // Convert to 1-based
-                                break;
+                    if (keyValues != null) {
+                        for (int i = 0; i < indexCount; i++) {
+                            IndexDesc indexDesc = indexDescs[i];
+                            int indexAttrPos = -1;
+                            for (int j = 0; j < relDesc.attrCnt; j++) {
+                                if (attrDescs[j].attrName.equals(indexDesc.attrName)) {
+                                    indexAttrPos = j + 1; break;
+                                }
                             }
-                        }
-                        
-                        if (indexAttrPos == -1) continue;
-                        
-                        Object keyValue = keyValues.get(indexAttrPos);
-                        if (keyValue == null) continue;
-                        
-                        // Update index based on type
-                        if (indexDesc.accessType.indexType == IndexType.B_Index) {
-                            BTreeFile btf = null;
-                            try {
-                                // Get index name
+                            if (indexAttrPos == -1) continue;
+                            Object keyValue = keyValues.get(indexAttrPos);
+                            if (keyValue == null) continue;
+
+                            // Update BTree index (using pre-opened file)
+                            if (indexDesc.accessType.indexType == IndexType.B_Index) {
                                 String btreeFileName = ExtendedSystemDefs.MINIBASE_INDCAT.buildIndexName(
                                     relationName, indexDesc.attrName, indexDesc.accessType);
-                                    
-                                btf = new BTreeFile(btreeFileName);
-                                
-                                // Create key and delete from BTree
-                                KeyClass key = null;
-                                switch (attrTypes[indexAttrPos-1].attrType) {
-                                    case AttrType.attrInteger:
-                                        key = new IntegerKey((Integer)keyValue);
-                                        break;
-                                    case AttrType.attrReal:
-                                        key = new IntegerKey((int)((Float)keyValue).floatValue());
-                                        break;
-                                    case AttrType.attrString:
-                                        key = new StringKey((String)keyValue);
-                                        break;
-                                }
-                                
-                                if (key != null) {
-                                    btf.Delete(key, deleteRid);
-                                }
-                            } catch (Exception e) {
-                                System.err.println("Warning: Error updating BTree index: " + e.getMessage());
-                            } finally {
+                                BTreeFile btf = openBTreeFiles.get(btreeFileName);
                                 if (btf != null) {
-                                    try { btf.close(); } catch (Exception e) { /* Ignore */ }
+                                    try {
+                                        KeyClass key = null;
+                                        switch (attrTypes[indexAttrPos-1].attrType) {
+                                            case AttrType.attrInteger: key = new IntegerKey((Integer)keyValue); break;
+                                            case AttrType.attrReal: key = new IntegerKey((int)((Float)keyValue).floatValue()); break;
+                                            case AttrType.attrString: key = new StringKey((String)keyValue); break;
+                                        }
+                                        if (key != null) {
+                                            btf.Delete(key, deleteRid);
+                                        }
+                                    } catch (Exception e) {
+                                        System.err.println("Warning: Error updating BTree index '" + btreeFileName + "' during delete: " + e.getMessage());
+                                    }
+                                } else {
+                                     System.err.println("Warning: BTree file '" + btreeFileName + "' was not pre-opened successfully. Skipping update.");
                                 }
                             }
-                        } else if (indexDesc.accessType.indexType == IndexType.LSHFIndex) {
-                            try {
-                                // Find matching LSH index files
-                                File dir = new File(".");
-                                // **FIX: Correct the prefix to match the createIndex naming convention**
-                                // The prefix should be "RELNAME.COLUMNID." to find files like "REL1.2.10.5.ser"
-                                String prefix = relationName + "." + indexAttrPos + "."; // Corrected prefix
-                                File[] matchingFiles = dir.listFiles((d, name) ->
-                                    name.startsWith(prefix) && name.endsWith(".ser"));
+                            // Update LSH index (in-memory object)
+                            else if (indexDesc.accessType.indexType == IndexType.LSHFIndex) {
+                                String indexFileName = indexDesc.physicalFileName;
+                                LSHFIndex lshIndex = loadedLSHIndexes.get(indexFileName);
+                                Integer mappedAttrPos = lshIndexAttrMap.get(indexFileName);
 
-                                if (matchingFiles != null && matchingFiles.length > 0) {
-                                    for (File indexFile : matchingFiles) {
-                                        String indexFileName = indexFile.getName();
-
-                                        // Load the LSH index
-                                        LSHFIndex lshIndex = LSHFIndex.loadIndex(indexFileName);
-
-                                        // Create vector key and delete
+                                if (lshIndex != null && mappedAttrPos != null && mappedAttrPos == indexAttrPos) {
+                                    try {
                                         if (keyValue instanceof int[]) {
                                             int[] vectorData = (int[])keyValue;
                                             Vector100Dtype vectorObj = new Vector100Dtype(vectorData);
                                             Vector100DKey key = new Vector100DKey(vectorObj);
-
-                                            // Remove from LSH index
                                             lshIndex.delete(key, deleteRid);
-
-                                            // Save the updated index
-                                            lshIndex.saveIndex(indexFileName);
                                         } else {
-                                             // Add warning if key type is unexpected
-                                             System.err.println("Warning: Expected int[] key for LSH index deletion, but got " + (keyValue != null ? keyValue.getClass().getName() : "null"));
+                                            System.err.println("Warning: Expected int[] key for LSH index deletion, but got " + (keyValue != null ? keyValue.getClass().getName() : "null"));
                                         }
+                                    } catch (Exception e) {
+                                        System.err.println("Warning: Error updating in-memory LSH index '" + indexFileName + "' during delete: " + e.getMessage());
                                     }
-                                } else {
-                                     // Optional: Add a warning if no index file was found for an expected index
-                                     System.err.println("Warning: No LSH index file found matching prefix '" + prefix + "' for relation '" + relationName + "' attribute " + indexAttrPos + " during delete.");
+                                } else if (indexFileName != null) {
+                                     System.err.println("Warning: LSH index '" + indexFileName + "' was not pre-loaded successfully or attribute mismatch. Skipping update.");
                                 }
-                            } catch (Exception e) {
-                                System.err.println("Warning: Error updating LSH index during delete: " + e.getMessage());
                             }
-                        }
+                        } // End loop through indexDescs
+                    } else {
+                        System.err.println("Warning: Could not find stored key values for deleted RID: " + deleteRid);
                     }
-                }
-                
+                } // End if indexes exist
+                // *** END BATCHING UPDATE ***
+
+                // Now delete the record from the heap file
+                heapFile.deleteRecord(deleteRid);
+                deletedCount++;
+
             } catch (Exception e) {
-                System.err.println("Warning: Failed to delete record: " + e.getMessage());
+                System.err.println("Warning: Failed to delete record or update indexes for RID " + deleteRid + ": " + e.getMessage());
+                // Decide if you want to continue or stop on error
+            }
+        } // End loop through toDelete RIDs
+
+        // *** BATCHING: Save updated LSH indexes ***
+        System.out.println("DEBUG: Saving updated LSH indexes...");
+        for (Map.Entry<String, LSHFIndex> entry : loadedLSHIndexes.entrySet()) {
+            String filename = entry.getKey();
+            LSHFIndex index = entry.getValue();
+            try {
+                index.saveIndex(filename);
+                System.out.println("DEBUG: Saved LSH index: " + filename);
+            } catch (IOException e_save) {
+                System.err.println("ERROR: Failed to save updated LSH index '" + filename + "': " + e_save.getMessage());
             }
         }
-        
+        // *** END BATCHING SAVE ***
+
         // Report success and statistics
         System.out.println("Successfully deleted " + deletedCount + " tuples from relation '" + relationName + "'.");
         System.out.println("Page reads: " + PCounter.getRCount());
         System.out.println("Page writes: " + PCounter.getWCount());
-        
+
     } catch (Exception e) {
         System.err.println("Error batch deleting data: " + e.getMessage());
         e.printStackTrace();
@@ -1543,9 +1622,19 @@ private static void batchDelete(String updateFileName, String relationName) thro
         if (reader != null) {
             try { reader.close(); } catch (Exception e) { /* Ignore */ }
         }
-        if (scan != null) {
+        if (scan != null) { // Should be closed already, but just in case
             try { scan.closescan(); } catch (Exception e) { /* Ignore */ }
         }
+        // *** BATCHING: Close BTree files ***
+        for (Map.Entry<String, BTreeFile> entry : openBTreeFiles.entrySet()) {
+            try {
+                entry.getValue().close();
+                System.out.println("DEBUG: Closed BTree file: " + entry.getKey());
+            } catch (Exception e_close) {
+                System.err.println("Warning: Failed to close BTree file '" + entry.getKey() + "': " + e_close.getMessage());
+            }
+        }
+        // No need to explicitly close LSH indexes here
     }
 }
 
@@ -1606,15 +1695,18 @@ private static void executeQuery(String relName1, String relName2, String queryS
     BufferedReader reader = null;
     
     try {
-        // Read the query specification file
+        // Read the ENTIRE query specification file
         reader = new BufferedReader(new FileReader(querySpecFile));
-        String queryLine = reader.readLine();
+        StringBuilder queryBuilder = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            queryBuilder.append(line).append(" "); // Add space instead of newline
+        }
+        String queryLine = queryBuilder.toString().trim();
         
-        if (queryLine == null || queryLine.trim().isEmpty()) {
+        if (queryLine.isEmpty()) {
             throw new Exception("Query specification file is empty");
         }
-        
-        queryLine = queryLine.trim();
         
         // Parse the query to identify type and parameters
         if (queryLine.startsWith("Sort(")) {
@@ -1993,32 +2085,33 @@ private static FldSpec[] createProjectionList(String[] outputFields, int attrCou
  * @param attrTypes Array of attribute types
  * @return String representation of the tuple
  */
-private static String tupleToString(Tuple tuple, FldSpec[] projlist, AttrType[] attrTypes) throws Exception {
+private static String tupleToString(Tuple tuple, FldSpec[] projlist, AttrType[] projAttrTypes) throws Exception {
     StringBuilder sb = new StringBuilder("[");
 
-    for (int i = 0; i < projlist.length; i++) {
-        int fieldNum = projlist[i].offset; // 1-based field number
+    // Loop through the fields *present in the projected tuple*.
+    for (int i = 0; i < projlist.length; i++) { // Loop based on the number of projected fields
 
         if (i > 0) {
             sb.append(", ");
         }
 
-        // Get type from the original schema using fieldNum - 1
-        AttrType fieldType = attrTypes[fieldNum-1];
+        // *** FIX: Get type using loop index 'i' from projAttrTypes ***
+        AttrType fieldType = projAttrTypes[i];
 
         try {
+            // *** FIX: Access fields using sequential index 'i + 1' ***
             switch (fieldType.attrType) {
                 case AttrType.attrInteger:
-                    sb.append(tuple.getIntFld(fieldNum));
+                    sb.append(tuple.getIntFld(i + 1));
                     break;
                 case AttrType.attrReal:
-                    sb.append(tuple.getFloFld(fieldNum));
+                    sb.append(tuple.getFloFld(i + 1));
                     break;
                 case AttrType.attrString:
-                    sb.append(tuple.getStrFld(fieldNum));
+                    sb.append(tuple.getStrFld(i + 1));
                     break;
                 case AttrType.attrVector100D:
-                    int[] vec = tuple.getVectorFld(fieldNum);
+                    int[] vec = tuple.getVectorFld(i + 1);
                     // Print only first few elements for brevity
                     sb.append("Vec{");
                     for(int j=0; j<Math.min(vec.length, 5); j++) {
@@ -2031,8 +2124,19 @@ private static String tupleToString(Tuple tuple, FldSpec[] projlist, AttrType[] 
                      sb.append("?"); // Unknown type
             }
         } catch (FieldNumberOutOfBoundException e) {
-             // This shouldn't happen if projlist is correct
-             sb.append("ERR_FLD");
+             // This error now indicates a problem with the tuple structure itself
+             // or a mismatch between projlist.length and the actual number of fields in the tuple.
+             sb.append("ERR_FLD_INTERNAL"); // Changed error message for clarity
+             System.err.println("Internal Error in tupleToString: Field " + (i+1) + " out of bounds for projected tuple. Type expected: " + fieldType.attrType);
+             e.printStackTrace(); // Print stack trace for debugging
+             // Optionally re-throw or handle differently
+             throw e; // Re-throwing might be best to signal a bug
+        } catch (Exception e) {
+             // Catch other potential errors during field access
+             sb.append("ERR_ACCESS");
+             System.err.println("Error accessing field " + (i+1) + " in tupleToString: " + e.getMessage());
+             e.printStackTrace();
+             throw e; // Re-throwing might be best
         }
     }
 
@@ -2054,19 +2158,19 @@ private static String tupleToString(Tuple tuple, FldSpec[] projlist, AttrType[] 
 private static void executeFilterQuery(String queryExpr, String relName, int bufferPages) throws Exception {
     // NOTE: bufferPages is passed but not directly used by FileScan or IndexScan constructors.
     // It influences the global buffer pool size set during 'open database'.
+
     String[] params = parseQueryParams(queryExpr);
 
-    // **FIX: Expect K as the 3rd parameter, I as the 4th**
-    if (params.length < 4) { // Changed from 3 to 4
-        throw new Exception("Filter query requires at least 4 parameters: QA, T, K, I, [output fields]"); // Added K
+    // Expect at least 4 parameters: QA, T, K, I
+    if (params.length < 4) {
+        throw new Exception("Filter query requires at least 4 parameters: QA, T, K, I, [output fields]");
     }
 
-    // Parse parameters
-    int queryAttrNum = Integer.parseInt(params[0].trim());
-    String targetValue = params[1].trim();
-    // **FIX: Parse K**
-    int k = Integer.parseInt(params[2].trim()); // K - Number of results
-    String indexOption = params[3].trim(); // I is now the 4th parameter
+    // --- Parse Parameters ---
+    int queryAttrNum = Integer.parseInt(params[0].trim()); // QA
+    String targetValue = params[1].trim();                 // T
+    int k = Integer.parseInt(params[2].trim());            // K
+    String indexOption = params[3].trim().toUpperCase();   // I (convert to uppercase for easier comparison)
 
     if (k < 0) {
         System.out.println("Warning: K is negative ("+ k +"). Interpreting as return all matching results (k=0).");
@@ -2075,42 +2179,36 @@ private static void executeFilterQuery(String queryExpr, String relName, int buf
         System.out.println("Note: K=0 specified. Returning all matching results.");
     }
 
-    // Parse output fields
+    // Parse optional output fields (parameter 5 onwards)
     String[] outputFields = null;
-    // **FIX: Check params.length > 4 for output fields**
     if (params.length > 4) {
-        String outputSpec = params[4].trim(); // Output spec is now the 5th parameter
-        if (outputSpec.equals("*")) {
-            // All fields - will be handled later
-            outputFields = null;
-        } else {
-            // Parse list of field numbers
+        String outputSpec = params[4].trim();
+        if (!outputSpec.equals("*")) {
             outputFields = outputSpec.split("\\s+");
         }
+        // If outputSpec is "*", outputFields remains null, handled by createProjectionList
     }
 
-    // Get relation information
+    // --- Get Schema Information ---
     RelDesc relDesc = new RelDesc();
     ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(relName, relDesc);
 
-    // Get attribute information
     AttrDesc[] attrDescs = new AttrDesc[relDesc.attrCnt];
     for (int i = 0; i < relDesc.attrCnt; i++) {
         attrDescs[i] = new AttrDesc();
     }
     ExtendedSystemDefs.MINIBASE_ATTRCAT.getRelInfo(relName, relDesc.attrCnt, attrDescs);
 
-    // Verify query attribute is valid
+    // Verify query attribute is valid and not a vector
     if (queryAttrNum < 1 || queryAttrNum > relDesc.attrCnt) {
         throw new Exception("Invalid query attribute number: " + queryAttrNum);
     }
-
-    // Ensure field is not a vector (requirement for Filter query)
-    if (attrDescs[queryAttrNum-1].attrType.attrType == AttrType.attrVector100D) {
+    AttrType queryAttrActualType = attrDescs[queryAttrNum-1].attrType;
+    if (queryAttrActualType.attrType == AttrType.attrVector100D) {
         throw new Exception("Filter query requires a non-vector attribute");
     }
 
-    // Setup query attributes
+    // Setup full schema attributes and string sizes
     AttrType[] attrTypes = new AttrType[relDesc.attrCnt];
     int strCount = 0;
     for (int i = 0; i < relDesc.attrCnt; i++) {
@@ -2119,8 +2217,6 @@ private static void executeFilterQuery(String queryExpr, String relName, int buf
             strCount++;
         }
     }
-
-    // Create string sizes array
     short[] strSizes = new short[strCount];
     int strIndex = 0;
     for (int i = 0; i < relDesc.attrCnt; i++) {
@@ -2129,154 +2225,211 @@ private static void executeFilterQuery(String queryExpr, String relName, int buf
         }
     }
 
-    // Setup projection
+    // --- Setup Projection ---
     FldSpec[] projlist = createProjectionList(outputFields, relDesc.attrCnt);
 
-    // Create condition for filtering
-    CondExpr[] expr = new CondExpr[2]; // We need 2: one for the condition, one for null termination
+    // Determine schema of projected output (needed for tupleToString)
+    AttrType[] projAttrTypes = new AttrType[projlist.length];
+    List<Short> projStrSizesList = new ArrayList<>();
+    for(int i=0; i<projlist.length; i++){
+        int fldNum = projlist[i].offset; // 1-based
+        projAttrTypes[i] = attrTypes[fldNum-1]; // Get type from original schema
+        if(projAttrTypes[i].attrType == AttrType.attrString){
+            int originalStrIndex = 0;
+            for(int attrIdx=0; attrIdx<fldNum-1; attrIdx++){
+                if(attrTypes[attrIdx].attrType == AttrType.attrString) originalStrIndex++;
+            }
+            if (originalStrIndex < strSizes.length) {
+                projStrSizesList.add(strSizes[originalStrIndex]);
+            } else {
+                throw new Exception("Internal Error: Could not determine string size for projected field " + fldNum);
+            }
+        }
+    }
+    short[] projStrSizes = new short[projStrSizesList.size()];
+    for(int i=0; i<projStrSizesList.size(); i++) projStrSizes[i] = projStrSizesList.get(i);
+
+    // --- Create Condition Expression ---
+    CondExpr[] expr = new CondExpr[2]; // Need 2: one for condition, one for null termination
     expr[0] = new CondExpr();
     expr[0].op = new AttrOperator(AttrOperator.aopEQ); // Equality operator
     expr[0].type1 = new AttrType(AttrType.attrSymbol);
     expr[0].operand1.symbol = new FldSpec(new RelSpec(RelSpec.outer), queryAttrNum);
+    expr[1] = null; // Null terminate the expression array
 
-    // Set operand2 based on the attribute type
-    AttrType queryAttrActualType = attrTypes[queryAttrNum-1];
-    switch (queryAttrActualType.attrType) {
-        case AttrType.attrInteger:
-            expr[0].type2 = new AttrType(AttrType.attrInteger);
-            expr[0].operand2.integer = Integer.parseInt(targetValue);
-            break;
-        case AttrType.attrReal:
-            expr[0].type2 = new AttrType(AttrType.attrReal);
-            expr[0].operand2.real = Float.parseFloat(targetValue);
-            break;
-        case AttrType.attrString:
-            expr[0].type2 = new AttrType(AttrType.attrString);
-            expr[0].operand2.string = targetValue;
-            break;
-        default:
-            throw new Exception("Unsupported attribute type for filter");
+    // Set operand2 based on the actual attribute type
+    // Store original type info in case we need to reset for FileScan
+    AttrType originalExprType2 = null;
+    Operand originalExprOperand2 = new Operand(); // Store original value
+
+    try {
+        switch (queryAttrActualType.attrType) {
+            case AttrType.attrInteger:
+                expr[0].type2 = new AttrType(AttrType.attrInteger);
+                expr[0].operand2.integer = Integer.parseInt(targetValue);
+                originalExprType2 = expr[0].type2;
+                originalExprOperand2.integer = expr[0].operand2.integer;
+                break;
+            case AttrType.attrReal:
+                expr[0].type2 = new AttrType(AttrType.attrReal);
+                expr[0].operand2.real = Float.parseFloat(targetValue);
+                originalExprType2 = expr[0].type2;
+                originalExprOperand2.real = expr[0].operand2.real;
+                break;
+            case AttrType.attrString:
+                expr[0].type2 = new AttrType(AttrType.attrString);
+                expr[0].operand2.string = targetValue;
+                originalExprType2 = expr[0].type2;
+                originalExprOperand2.string = expr[0].operand2.string;
+                break;
+            default:
+                // Should be caught earlier, but defensive check
+                throw new Exception("Unsupported attribute type for filter: " + queryAttrActualType.attrType);
+        }
+    } catch (NumberFormatException e) {
+        throw new Exception("Invalid target value format for attribute type " + queryAttrActualType + ": " + targetValue);
     }
 
-    expr[1] = null; // Mark the end of the conditions
-
-    // Determine if we should use index
-    boolean useIndex = indexOption.equalsIgnoreCase("H");
-
+    // --- Determine Scan Strategy ---
+    // Assuming 'H' means use BTree index based on the provided code context
+    boolean useIndex = indexOption.equals("H");
     iterator.Iterator scan = null;
-    try {
-        // Create appropriate scan based on index option
-        if (useIndex) {
-            // Check if BTree index exists for this attribute
-            boolean indexFound = false;
-            int indexCount = relDesc.indexCnt;
+    boolean indexFoundAndUsed = false; // Track if we successfully set up IndexScan
+    IndexType indexTypeUsed = null; // Store the type of index found
+    String indexNameUsed = null; // Store the name of the index found
 
+    try {
+        if (useIndex) {
+            // Check if a suitable BTree index exists
+            int indexCount = relDesc.indexCnt;
             if (indexCount > 0) {
                 IndexDesc[] indexDescs = new IndexDesc[indexCount];
-                for (int i = 0; i < indexCount; i++) {
-                    indexDescs[i] = new IndexDesc();
-                }
+                for (int i = 0; i < indexCount; i++) indexDescs[i] = new IndexDesc();
 
                 try {
                     ExtendedSystemDefs.MINIBASE_INDCAT.getRelInfo(relName, indexCount, indexDescs);
 
-                    // Find matching index for our attribute
+                    // Find matching BTree index for our attribute
                     for (int i = 0; i < indexCount; i++) {
-                        // Find the attribute position for this index
                         int indexAttrPos = -1;
+                        // Find the position (1-based) of the attribute this index is on
                         for (int j = 0; j < relDesc.attrCnt; j++) {
                             if (attrDescs[j].attrName.equals(indexDescs[i].attrName)) {
-                                indexAttrPos = j + 1; // Convert to 1-based
+                                indexAttrPos = j + 1; // 1-based
                                 break;
                             }
                         }
 
-                        // If this index matches our query attribute and is a BTree
+                        // Check if index matches query attribute and is a BTree
                         if (indexAttrPos == queryAttrNum &&
                             indexDescs[i].accessType.indexType == IndexType.B_Index) {
 
-                            // *** START CHANGE: Adjust CondExpr for Real->Integer BTree ***
+                            indexTypeUsed = indexDescs[i].accessType; // Store index type
+                            indexNameUsed = ExtendedSystemDefs.MINIBASE_INDCAT.buildIndexName(
+                                relName, indexDescs[i].attrName, indexDescs[i].accessType);
+
+                            // *** PREDICATE ADJUSTMENT LOGIC ***
+                            // Handle potential Real->Integer type mismatch for BTree key
+                            // ASSUMPTION: BTree on Real attribute uses IntegerKey
                             if (queryAttrActualType.attrType == AttrType.attrReal) {
                                 System.out.println("DEBUG: Adjusting CondExpr for Real->Integer BTree index scan.");
                                 // Modify the expression to use Integer type and casted value
                                 expr[0].type2 = new AttrType(AttrType.attrInteger);
-                                // Re-parse and cast the target value
-                                expr[0].operand2.integer = (int)Float.parseFloat(targetValue);
-                                // Clear the float value just in case
-                                expr[0].operand2.real = 0.0f;
+                                // Re-parse and cast the target value (already parsed as float above)
+                                expr[0].operand2.integer = (int)originalExprOperand2.real; // Use stored original float
+                                // Optionally clear the float value if Operand uses a union-like structure
+                                // expr[0].operand2.real = 0.0f;
                             }
-                            // *** END CHANGE ***
+                            // *** END PREDICATE ADJUSTMENT ***
 
-                            // Get index name
-                            String indexName = ExtendedSystemDefs.MINIBASE_INDCAT.buildIndexName(
-                                relName, indexDescs[i].attrName, indexDescs[i].accessType);
-
-                            // Create index scan (now using the potentially modified expr)
+                            // Create IndexScan
                             scan = new IndexScan(
-                                new IndexType(IndexType.B_Index),
+                                indexTypeUsed, // Use the found index type
                                 relName,
-                                indexName,
-                                attrTypes,
-                                strSizes,
+                                indexNameUsed,
+                                attrTypes, // Full schema
+                                strSizes,  // Full schema string sizes
                                 relDesc.attrCnt,
-                                projlist.length,
-                                projlist,
-                                expr, // Pass the potentially modified expr
-                                queryAttrNum,  // field number of the indexed field
-                                false         // false = return full tuple, not just index key
+                                projlist.length, // Number of fields to project
+                                projlist,        // Projection list
+                                expr,            // Pass the potentially modified expr
+                                queryAttrNum,    // Field number of the indexed field
+                                false            // false = return full tuple
                             );
 
-                            indexFound = true;
-                            System.out.println("Using BTree index for filter query");
+                            indexFoundAndUsed = true; // Mark that we are using the index
+                            System.out.println("Using BTree index for filter query: " + indexNameUsed);
                             break; // Found suitable index, stop searching
                         }
-                    }
-                } catch (Exception e) {
-                    System.err.println("Warning: Error accessing index information: " + e.getMessage());
-                }
-            }
+                    } // End loop through indexes
 
-            if (!indexFound) {
-                System.out.println("No suitable index found, using sequential scan");
-                // ** Ensure expr is reset if it was modified for index but index wasn't used **
-                // (Re-create based on original type if needed, though FileScan might handle mismatch gracefully)
-                // For simplicity, let's assume FileScan handles the original expr correctly.
+                } catch (Exception e) {
+                    // Catch errors during catalog access
+                    System.err.println("Warning: Error accessing index information: " + e.getMessage());
+                    // Fallback to FileScan if index access fails critically
+                    indexFoundAndUsed = false; // Ensure we fallback
+                }
+            } // End if indexCount > 0
+
+            // If index was desired ('H') but not found or failed to setup
+            if (!indexFoundAndUsed) {
+                System.out.println("No suitable BTree index found or index access failed, using sequential scan");
+
+                // Reset CondExpr if it was modified for Real->Integer index attempt
+                if (queryAttrActualType.attrType == AttrType.attrReal && expr[0].type2.attrType == AttrType.attrInteger) {
+                    System.out.println("DEBUG: Resetting CondExpr back to Real for FileScan.");
+                    expr[0].type2 = originalExprType2; // Restore original type
+                    expr[0].operand2.real = originalExprOperand2.real; // Restore original value
+                    // Optionally clear integer value
+                    // expr[0].operand2.integer = 0;
+                }
+
+                // Create FileScan
                 scan = new FileScan(relName, attrTypes, strSizes,
                     (short) relDesc.attrCnt, (short) projlist.length,
-                    projlist, expr); // Pass the original or modified expr
+                    projlist, expr); // Pass the original or reset expr
             }
         } else {
-            // Use FileScan (no index)
-            System.out.println("Using sequential scan for filter query");
+            // Index use not requested ('S' option or default)
+            System.out.println("Using sequential scan for filter query (index use not requested)");
+            // Ensure expression uses the original type (it should not have been modified)
             scan = new FileScan(relName, attrTypes, strSizes,
                 (short) relDesc.attrCnt, (short) projlist.length,
                 projlist, expr); // Pass the original expr
         }
 
-        // Print header
-        // **FIX: Update print statement to reflect K**
+        // --- Process Results ---
         System.out.println("Filter query results" + (k > 0 ? " (Top " + k + ")" : "") + ":");
         System.out.println("--------------------");
 
-        // Retrieve and print results
         int resultCount = 0;
         Tuple tuple = null;
 
-        // **FIX: Add check for K in the loop**
+        // Loop until K results are found (if K>0) or scan is exhausted
         while ((k == 0 || resultCount < k) && (tuple = scan.get_next()) != null) {
-            System.out.println(tupleToString(tuple, projlist, attrTypes));
-            resultCount++; // Increment count after processing a tuple
+            // The tuple returned by FileScan/IndexScan should already be projected.
+            // Pass the projected schema types to tupleToString.
+            System.out.println(tupleToString(tuple, projlist, projAttrTypes));
+            resultCount++;
         }
 
         // Print summary
         System.out.println("--------------------");
-        // **FIX: Update summary message**
         System.out.println("Total records returned: " + resultCount + (k > 0 ? " (limited to K=" + k + ")" : ""));
 
     } finally {
-        // Close the scan
+        // --- Close the Iterator ---
         if (scan != null) {
-            scan.close();
+             System.out.println("DEBUG: Attempting to close scan in finally block (Type: " + scan.getClass().getName() + ")");
+            try {
+                scan.close();
+                System.out.println("DEBUG: Scan closed successfully in finally block.");
+            } catch (Exception closeEx) {
+                System.err.println("ERROR: Failed to close scan in finally block: " + closeEx.getMessage());
+                closeEx.printStackTrace(); // Print stack trace for debugging close issues
+            }
+        } else {
+             System.out.println("DEBUG: Scan was null in finally block (likely error during setup).");
         }
     }
 }
@@ -2467,59 +2620,57 @@ private static void executeRangeQuery(String queryExpr, String relName, int buff
 private static void executeNNQuery(String queryExpr, String relName, int bufferPages) throws Exception {
     // NOTE: bufferPages is passed but not directly used by FileScan or NNIndexScan constructors.
     String[] params = parseQueryParams(queryExpr);
-    
+
     if (params.length < 4) {
         throw new Exception("NN query requires at least 4 parameters: QA, T, K, I, [output fields]");
     }
-    
+
     // Parse parameters
     int queryAttrNum = Integer.parseInt(params[0].trim());
     String targetVectorFile = params[1].trim();
     int k = Integer.parseInt(params[2].trim());
     String indexOption = params[3].trim();
-    
+
     if (k < 0) {
         throw new Exception("NN parameter K must be non-negative");
+    } else if (k == 0) {
+        System.out.println("Note: K=0 specified. Returning all results sorted by distance.");
     }
-    
+
     // Parse output fields
     String[] outputFields = null;
     if (params.length > 4) {
         String outputSpec = params[4].trim();
-        if (outputSpec.equals("*")) {
-            // All fields - will be handled later
-            outputFields = null;
-        } else {
-            // Parse list of field numbers
+        if (!outputSpec.equals("*")) {
             outputFields = outputSpec.split("\\s+");
         }
     }
-    
+
     // Read target vector from file
     int[] targetVector = readVectorFromFile(targetVectorFile);
     Vector100Dtype targetVec = new Vector100Dtype(targetVector);
-    
+
     // Get relation information
     RelDesc relDesc = new RelDesc();
     ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(relName, relDesc);
-    
+
     // Get attribute information
     AttrDesc[] attrDescs = new AttrDesc[relDesc.attrCnt];
     for (int i = 0; i < relDesc.attrCnt; i++) {
         attrDescs[i] = new AttrDesc();
     }
     ExtendedSystemDefs.MINIBASE_ATTRCAT.getRelInfo(relName, relDesc.attrCnt, attrDescs);
-    
+
     // Verify query attribute is a vector
     if (queryAttrNum < 1 || queryAttrNum > relDesc.attrCnt) {
         throw new Exception("Invalid query attribute number: " + queryAttrNum);
     }
-    
+
     if (attrDescs[queryAttrNum-1].attrType.attrType != AttrType.attrVector100D) {
         throw new Exception("NN query attribute must be a vector");
     }
-    
-    // Setup query attributes
+
+    // Setup query attributes (full schema)
     AttrType[] attrTypes = new AttrType[relDesc.attrCnt];
     int strCount = 0;
     for (int i = 0; i < relDesc.attrCnt; i++) {
@@ -2528,8 +2679,8 @@ private static void executeNNQuery(String queryExpr, String relName, int bufferP
             strCount++;
         }
     }
-    
-    // Create string sizes array
+
+    // Create string sizes array (full schema)
     short[] strSizes = new short[strCount];
     int strIndex = 0;
     for (int i = 0; i < relDesc.attrCnt; i++) {
@@ -2537,16 +2688,40 @@ private static void executeNNQuery(String queryExpr, String relName, int bufferP
             strSizes[strIndex++] = (short) attrDescs[i].attrLen;
         }
     }
-    
-    // Setup projection
+
+    // Setup projection list for the final output
     FldSpec[] projlist = createProjectionList(outputFields, relDesc.attrCnt);
-    
+    int outFldCnt = projlist.length;
+
+    // Determine schema of projected output (needed for tupleToString)
+    AttrType[] projAttrTypes = new AttrType[outFldCnt];
+    List<Short> projStrSizesList = new ArrayList<>();
+    for(int i=0; i<outFldCnt; i++){
+        int fldNum = projlist[i].offset; // 1-based
+        projAttrTypes[i] = attrTypes[fldNum-1]; // Get type from original schema
+        if(projAttrTypes[i].attrType == AttrType.attrString){
+            // Find the correct string size from the original schema's strSizes
+            int originalStrIndex = 0;
+            for(int attrIdx=0; attrIdx<fldNum-1; attrIdx++){
+                if(attrTypes[attrIdx].attrType == AttrType.attrString) originalStrIndex++;
+            }
+            if (originalStrIndex < strSizes.length) {
+                projStrSizesList.add(strSizes[originalStrIndex]);
+            } else {
+                throw new Exception("Internal error: String size mapping failed during projection setup.");
+            }
+        }
+    }
+    short[] projStrSizes = new short[projStrSizesList.size()];
+    for(int i=0; i<projStrSizesList.size(); i++) projStrSizes[i] = projStrSizesList.get(i);
+
+
     // Determine if we should use LSH index
     boolean useIndex = indexOption.equalsIgnoreCase("H");
-    
-    iterator.Iterator scan = null;
+
+    iterator.Iterator scan = null; // Use the specific iterator type
     String indexNameToUse = null;
-    
+
     try {
         if (useIndex) {
             indexNameToUse = findLSHIndex(relName, queryAttrNum, relDesc, attrDescs);
@@ -2557,110 +2732,104 @@ private static void executeNNQuery(String queryExpr, String relName, int bufferP
                     new IndexType(IndexType.LSHFIndex),
                     relName,
                     indexNameToUse,
-                    attrTypes,
-                    strSizes,
-                    relDesc.attrCnt,
-                    projlist.length,
-                    projlist,
-                    null,      // No condition expressions needed
+                    attrTypes, // Pass full schema
+                    strSizes,  // Pass full schema string sizes
+                    relDesc.attrCnt, // Pass full schema info
+                    outFldCnt,       // Pass projection info
+                    projlist,        // Pass projection info
+                    null,            // No selection conditions for NNIndexScan itself
                     queryAttrNum,
                     targetVec,
-                    k          // Number of nearest neighbors to return
+                    k
                 );
             } else {
-                System.out.println("No suitable LSH index found, using sequential scan");
-                useIndex = false; // Fallback to sequential scan
+                System.out.println("No suitable LSH index found, using sequential scan with sorting");
+                useIndex = false; // Fallback
             }
         }
-        
+
         // If no index available or chosen, use sequential scan with manual sorting
         if (scan == null) {
-            System.out.println("Performing sequential scan for NN query");
-            
-            // Use FileScan for full relation scan
+            System.out.println("Using sequential scan and Sort iterator for NN query");
+            // Need FileScan -> Sort
             FileScan fileScan = new FileScan(relName, attrTypes, strSizes,
-                (short) relDesc.attrCnt, (short) projlist.length,
-                projlist, null);
-            
-            // Read all tuples, calculate distances and store them
-            List<Tuple> allTuples = new ArrayList<>();
-            List<Double> distances = new ArrayList<>();
-            Tuple tuple;
-            while ((tuple = fileScan.get_next()) != null) {
-                // Make a copy
-                Tuple tupleCopy = new Tuple(tuple.getTupleByteArray(), tuple.getOffset(), tuple.getLength());
-                tupleCopy.setHdr((short)attrTypes.length, attrTypes, strSizes);
-                
-                // Calculate distance
-                int[] vectorData = tupleCopy.getVectorFld(queryAttrNum);
-                Vector100Dtype vecObj = new Vector100Dtype(vectorData);
-                double distance = targetVec.distanceTo(vecObj);
-                
-                allTuples.add(tupleCopy);
-                distances.add(distance);
-            }
-            fileScan.close(); // Close the filescan
-            
-            // Sort indices by corresponding distances
-            List<Integer> indices = new ArrayList<>();
-            for (int i = 0; i < allTuples.size(); i++) {
-                indices.add(i);
-            }
-            indices.sort(Comparator.comparing(distances::get));
-            
-            // Print header
-            System.out.println("NN query results (k=" + k + "):");
-            System.out.println("---------------------------------------------");
-            System.out.println("Distance | Tuple");
-            System.out.println("---------------------------------------------");
-            
-            // Output k nearest neighbors or all if k=0
-            int resultCount = (k == 0) ? allTuples.size() : Math.min(k, allTuples.size());
-            for (int i = 0; i < resultCount; i++) {
-                int idx = indices.get(i);
-                System.out.printf("%.2f | %s%n", distances.get(idx),
-                    tupleToString(allTuples.get(idx), projlist, attrTypes));
-            }
-            
-            // Print summary
-            System.out.println("---------------------------------------------");
-            System.out.println("Total records found: " + resultCount);
-            
-        } else {
-            // Process indexed results (already limited to k nearest neighbors by NNIndexScan)
-            System.out.println("NN query results (k=" + k + "):");
-            System.out.println("---------------------------------------------");
-            System.out.println("Distance | Tuple");
-            System.out.println("---------------------------------------------");
-            
-            int resultCount = 0;
-            Tuple tuple;
-            while ((tuple = scan.get_next()) != null) {
-                // Calculate distance for display
-                double distance = -1.0;
-                try {
-                    int[] vectorData = tuple.getVectorFld(queryAttrNum);
-                    Vector100Dtype vecObj = new Vector100Dtype(vectorData);
-                    distance = targetVec.distanceTo(vecObj);
-                } catch (Exception e) {
-                     System.err.println("Warning: Could not calculate distance for a tuple. Skipping.");
-                     continue;
-                }
-                
-                System.out.printf("%.2f | %s%n", distance,
-                    tupleToString(tuple, projlist, attrTypes));
-                resultCount++;
-            }
-            
-            // Print summary
-            System.out.println("---------------------------------------------");
-            System.out.println("Total records found: " + resultCount);
+                                (short) relDesc.attrCnt, (short) relDesc.attrCnt, // Scan all fields for Sort
+                                createProjectionList(null, relDesc.attrCnt), null);
+
+            scan = new iterator.Sort( // Use the Sort iterator
+                attrTypes,         // Schema of tuples from fileScan
+                (short)relDesc.attrCnt,
+                strSizes,
+                fileScan,          // Input iterator
+                queryAttrNum,      // Sort field number (QA)
+                new TupleOrder(TupleOrder.Ascending), // Sort by ascending distance
+                400,               // Length of the sort field (vector)
+                bufferPages,       // Buffer pages
+                targetVec,         // Target vector for distance calculation
+                k                  // Pass K (number of results)
+            );
         }
-    }
-    finally {
-        // Close the scan if it was created and not already closed (e.g., NNIndexScan)
+
+        // --- Process Results ---
+        System.out.println("NN query results (k=" + k + "):");
+        System.out.println("---------------------------------------------");
+        System.out.println("Distance | Tuple");
+        System.out.println("---------------------------------------------");
+
+        Tuple resultTuple;
+        int resultCount = 0;
+        Tuple outputTuple = new Tuple(); // Reusable tuple for projection
+        outputTuple.setHdr((short)outFldCnt, projAttrTypes, projStrSizes); // Set header based on projected schema
+
+        // The NNIndexScan or Sort iterator will stop after K results
+        while ((resultTuple = scan.get_next()) != null) {
+            double distance;
+            // *** FIX: Get distance based on iterator type ***
+            if (scan instanceof NNIndexScan) {
+                distance = ((NNIndexScan) scan).get_last_distance();
+            } else if (scan instanceof iterator.Sort) {
+                // Sort iterator calculates distance internally, need to recalculate for display
+                // Or modify Sort to expose the distance? Recalculating is simpler for now.
+                try {
+                    // *** FIX 1: Create Vector100Dtype first ***
+                    int[] vectorData = resultTuple.getVectorFld(queryAttrNum);
+                    Vector100Dtype dataVec = new Vector100Dtype(vectorData); // Create Vector100Dtype
+
+                    // *** FIX 2: Use distanceTo and pass Vector100Dtype ***
+                    distance = targetVec.distanceTo(dataVec); // Use distanceTo with Vector100Dtype
+
+                } catch (Exception e) {
+                    System.err.println("Warning: Could not calculate distance for tuple in NN query (Sort): " + e.getMessage());
+                    distance = -1.0; // Indicate error
+                }
+            } else {
+                 // Should not happen with current logic
+                 distance = -999.0; // Unknown distance
+            }
+
+            // Project the tuple according to the output specification
+            // The tuple from NNIndexScan/Sort should have the full schema
+            Projection.Project(resultTuple, attrTypes, outputTuple, projlist, outFldCnt);
+
+            // Print using the projected tuple and the determined distance
+            // *** FIX: Pass projAttrTypes to tupleToString ***
+            System.out.printf("%.2f | %s%n", distance, tupleToString(outputTuple, projlist, projAttrTypes));
+            resultCount++;
+
+            // Although iterators should limit to K, add a safety break
+            if (k > 0 && resultCount >= k) {
+                break;
+            }
+        }
+
+        // Print summary
+        System.out.println("---------------------------------------------");
+        System.out.println("Total records found: " + resultCount);
+
+    } finally {
+        // Close the scan if it was created
         if (scan != null) {
-            scan.close();
+             scan.close();
         }
     }
 }
@@ -2824,51 +2993,67 @@ private static void executeDJoinQuery(String queryExpr, String defaultRelName1, 
          for(int i=0; i<tempStrSizes.size(); i++) jStrSizes[i] = tempStrSizes.get(i);
 
 
-    } else { // Project specified fields (O#/I#)
+    } else { // Project specified fields (now accepting simple numbers instead of O#/I#)
         outFldCnt = outputFieldsSpec.length;
         projListJoin = new FldSpec[outFldCnt];
         jTypes = new AttrType[outFldCnt];
         List<Short> tempStrSizes = new ArrayList<>();
-        int outerStrIdx = 0;
-        int innerStrIdx = 0;
-
+        
+        // Calculate total number of fields for automatic assignment
+        int totalOuterFields = outerResult.numAttrs;
+        
         for (int i = 0; i < outFldCnt; i++) {
-            String fieldSpec = outputFieldsSpec[i].trim().toUpperCase();
-            if (fieldSpec.length() < 2) throw new Exception("Invalid field spec: " + fieldSpec);
-            char relType = fieldSpec.charAt(0);
-            int fieldNum = Integer.parseInt(fieldSpec.substring(1));
-
-            if (relType == 'O') {
-                if (fieldNum < 1 || fieldNum > outerResult.numAttrs) throw new Exception("Invalid outer field num: " + fieldNum);
+            String fieldSpec = outputFieldsSpec[i].trim();
+            int fieldNum;
+            try {
+                fieldNum = Integer.parseInt(fieldSpec);
+            } catch (NumberFormatException e) {
+                throw new Exception("Invalid field number: " + fieldSpec);
+            }
+            
+            if (fieldNum <= 0) {
+                throw new Exception("Field numbers must be positive: " + fieldNum);
+            }
+            
+            // Determine if this field belongs to outer or inner relation
+            if (fieldNum <= totalOuterFields) {
+                // Field from outer relation
                 projListJoin[i] = new FldSpec(new RelSpec(RelSpec.outer), fieldNum);
                 jTypes[i] = outerResult.attrTypes[fieldNum - 1];
                 if (jTypes[i].attrType == AttrType.attrString) {
                     // Find the correct string size from the original outer schema
                     int currentOuterStr = 0;
                     for(int outerAttr=0; outerAttr<fieldNum-1; outerAttr++){
-                        if(outerResult.attrTypes[outerAttr].attrType == AttrType.attrString) currentOuterStr++;
+                        if(outerResult.attrTypes[outerAttr].attrType == AttrType.attrString) 
+                            currentOuterStr++;
                     }
                     tempStrSizes.add(outerResult.strSizes[currentOuterStr]);
                 }
-            } else if (relType == 'I') {
-                if (fieldNum < 1 || fieldNum > relDesc2.attrCnt) throw new Exception("Invalid inner field num: " + fieldNum);
-                projListJoin[i] = new FldSpec(new RelSpec(RelSpec.innerRel), fieldNum);
-                jTypes[i] = attrTypes2[fieldNum - 1];
-                 if (jTypes[i].attrType == AttrType.attrString) {
-                     // Find the correct string size from the original inner schema
+            } else {
+                // Field from inner relation - adjust field number
+                int innerFieldNum = fieldNum - totalOuterFields;
+                if (innerFieldNum > relDesc2.attrCnt) {
+                    throw new Exception("Invalid field number: " + fieldNum + 
+                                       ". Inner relation only has " + relDesc2.attrCnt + " fields.");
+                }
+                
+                projListJoin[i] = new FldSpec(new RelSpec(RelSpec.innerRel), innerFieldNum);
+                jTypes[i] = attrTypes2[innerFieldNum - 1];
+                if (jTypes[i].attrType == AttrType.attrString) {
+                    // Find the correct string size from the original inner schema
                     int currentInnerStr = 0;
-                    for(int innerAttr=0; innerAttr<fieldNum-1; innerAttr++){
-                        if(attrTypes2[innerAttr].attrType == AttrType.attrString) currentInnerStr++;
+                    for(int innerAttr=0; innerAttr<innerFieldNum-1; innerAttr++){
+                        if(attrTypes2[innerAttr].attrType == AttrType.attrString) 
+                            currentInnerStr++;
                     }
                     tempStrSizes.add(strSizes2[currentInnerStr]);
                 }
-            } else {
-                throw new Exception("Invalid relation specifier '" + relType + "' in output fields.");
             }
         }
-         // Correct conversion from List<Short> to short[]
-         jStrSizes = new short[tempStrSizes.size()];
-         for(int i=0; i<tempStrSizes.size(); i++) jStrSizes[i] = tempStrSizes.get(i);
+        
+        // Correct conversion from List<Short> to short[]
+        jStrSizes = new short[tempStrSizes.size()];
+        for(int i=0; i<tempStrSizes.size(); i++) jStrSizes[i] = tempStrSizes.get(i);
     }
     if (outFldCnt == 0) throw new Exception("No output fields specified for DJOIN.");
 
@@ -2933,22 +3118,28 @@ private static void executeDJoinQuery(String queryExpr, String defaultRelName1, 
         // --- Process and Print Results ---
         System.out.println("DJOIN results (max distance: " + distanceThreshold + "):");
         System.out.println("---------------------------------------------");
-
-        Tuple outputTuple = new Tuple(); // Create a tuple object to be reused
-        outputTuple.setHdr((short) outFldCnt, jTypes, jStrSizes); // Set header once
-
+        
         int resultCount = 0;
         try {
-            while ((outputTuple = joinIterator.get_next()) != null) {
-                // The tuple returned by the join should already be projected.
-                // Header is already set if the join operator correctly populates the tuple.
-                // We might need to ensure the tuple object passed to get_next allows modification,
-                // or create a new one each time if necessary. Assuming get_next returns a valid tuple.
-                System.out.println(tupleToString(outputTuple, projListJoin, jTypes)); // Use jTypes here
-                resultCount++;
+            // Single tuple to receive join results
+            Tuple resultTuple;
+            
+            // Process join results one at a time
+            while ((resultTuple = joinIterator.get_next()) != null) {
+                try {
+                    // Set header on the result tuple that already contains join data
+                    resultTuple.setHdr((short) outFldCnt, jTypes, jStrSizes);
+                    
+                    // Print the tuple
+                    System.out.println(tupleToString(resultTuple, projListJoin, jTypes));
+                    resultCount++;
+                } catch (Exception tupleEx) {
+                    System.err.println("Warning: Error processing join result: " + tupleEx.getMessage());
+                    // Continue to next result instead of stopping
+                }
             }
         } catch (Exception e) {
-            System.err.println("Error getting next join result: " + e.getMessage());
+            System.err.println("Error during join operation: " + e.getMessage());
             e.printStackTrace();
         }
 
@@ -3111,34 +3302,41 @@ private static OuterQueryResult getOuterIteratorAndSchema(String outerQueryExpr,
  * Helper to find a suitable LSH index file name.
  */
 private static String findLSHIndex(String relName, int queryAttrNum, RelDesc relDesc, AttrDesc[] attrDescs) {
-     int indexCount = relDesc.indexCnt;
-     if (indexCount > 0) {
-         IndexDesc[] indexDescs = new IndexDesc[indexCount];
-         for (int i = 0; i < indexCount; i++) indexDescs[i] = new IndexDesc();
-         try {
-             ExtendedSystemDefs.MINIBASE_INDCAT.getRelInfo(relName, indexCount, indexDescs);
-             for (int i = 0; i < indexCount; i++) {
-                 int indexAttrPos = -1;
-                 for (int j = 0; j < relDesc.attrCnt; j++) {
-                     if (attrDescs[j].attrName.equals(indexDescs[i].attrName)) {
-                         indexAttrPos = j + 1; break;
-                     }
-                 }
-                 if (indexAttrPos == queryAttrNum && indexDescs[i].accessType.indexType == IndexType.LSHFIndex) {
-                     // Find the actual .ser file based on naming convention
-                     File dir = new File(".");
-                     String prefix = relName + queryAttrNum + "_L";
-                     File[] matchingFiles = dir.listFiles((d, name) -> name.startsWith(prefix) && name.endsWith(".ser"));
-                     if (matchingFiles != null && matchingFiles.length > 0) {
-                         return matchingFiles[0].getName(); // Return first match
-                     }
-                 }
-             }
-         } catch (Exception e) {
-             System.err.println("Warning: Error accessing index info for " + relName + ": " + e.getMessage());
-         }
-     }
-     return null; // No suitable index found
+    int indexCount = relDesc.indexCnt;
+    if (indexCount > 0) {
+        IndexDesc[] indexDescs = new IndexDesc[indexCount];
+        for (int i = 0; i < indexCount; i++) indexDescs[i] = new IndexDesc();
+        try {
+            ExtendedSystemDefs.MINIBASE_INDCAT.getRelInfo(relName, indexCount, indexDescs);
+            for (int i = 0; i < indexCount; i++) {
+                int indexAttrPos = -1;
+                for (int j = 0; j < relDesc.attrCnt; j++) {
+                    if (attrDescs[j].attrName.equals(indexDescs[i].attrName)) {
+                        indexAttrPos = j + 1; break;
+                    }
+                }
+                // Check attribute number, index type, and if physical name exists
+                if (indexAttrPos == queryAttrNum &&
+                    indexDescs[i].accessType.indexType == IndexType.LSHFIndex &&
+                    indexDescs[i].physicalFileName != null &&
+                    !indexDescs[i].physicalFileName.isEmpty())
+                {
+                    // Check if the physical file actually exists on disk
+                    File indexFile = new File(indexDescs[i].physicalFileName);
+                    if (indexFile.exists() && indexFile.isFile()) {
+                        System.out.println("DEBUG: Found LSH index entry in catalog with physical file: " + indexDescs[i].physicalFileName);
+                        return indexDescs[i].physicalFileName; // <-- RETURN THE STORED NAME
+                    } else {
+                        System.err.println("Warning: Catalog entry found for LSH index, but physical file '" + indexDescs[i].physicalFileName + "' does not exist.");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Warning: Error accessing index info for " + relName + ": " + e.getMessage());
+        }
+    }
+    System.out.println("DEBUG: No suitable and existing LSH index found in catalog for " + relName + " attribute " + queryAttrNum);
+    return null; // No suitable index found
 }
 
     

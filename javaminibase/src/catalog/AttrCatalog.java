@@ -69,58 +69,73 @@ public class AttrCatalog extends Heapfile
   
   // GET ATTRIBUTE DESCRIPTION
   public void getInfo(String relation, String attrName, AttrDesc record)
-    throws Catalogmissparam, 
-	   Catalogioerror, 
-	   Cataloghferror,
-	   AttrCatalogException, 
-	   IOException, 
-	   Catalogattrnotfound
+    throws Catalogmissparam,
+       Catalogioerror,
+       Cataloghferror,
+       AttrCatalogException,
+       IOException,
+       Catalogattrnotfound
     {
-      int recSize;
-	  RID rid = new RID();
-      Scan pscan = null; 
-      
-      
+      // int recSize; // Unused
+      RID rid = new RID(); // Initialized
+      Scan pscan = null;
+
+
       if ((relation == null)||(attrName == null))
-	throw new Catalogmissparam(null, "MISSING_PARAM");
-      
-      // OPEN SCAN
-      
-      try {
-	pscan = new Scan(this);
-      }
-      catch (Exception e1) {
-	throw new AttrCatalogException(e1, "scan failed");
-      }
-      
-      // SCAN FILE FOR ATTRIBUTE
-      // NOTE MUST RETURN ATTRNOTFOUND IF NOT FOUND!!!
-      
-      while (true){
-        try {
-          tuple = pscan.getNext(rid);
-          if (tuple == null)
-            throw new Catalogattrnotfound(null,"Catalog: Attribute not Found!");
+    throw new Catalogmissparam(null, "MISSING_PARAM");
 
-          // *** ADD THIS LINE ***
-          // Set the header using the schema defined in the constructor
-          tuple.setHdr((short)9, attrs, str_sizes);
-          // *** END ADDED LINE ***
+      try { // Use try-finally for scan closing
+          // OPEN SCAN
+          try {
+            pscan = new Scan(this);
+          }
+          catch (Exception e1) {
+            throw new AttrCatalogException(e1, "scan failed");
+          }
 
-          read_tuple(tuple, record);
-        }
-        catch (Exception e4) {
-          // Consider adding more specific exception handling if needed
-          // e4.printStackTrace(); // Optional logging
-          throw new AttrCatalogException(e4, "read_tuple or setHdr failed in getInfo");
-        }
+          // SCAN FILE FOR ATTRIBUTE
+          while (true){
+            try {
+              tuple = pscan.getNext(rid);
+              if (tuple == null) {
+                // If scan ends without finding, throw not found *after* the loop
+                break; // Exit loop if end of scan
+              }
 
-        if ( record.relName.equalsIgnoreCase(relation)==true
-             && record.attrName.equalsIgnoreCase(attrName)==true )
-          {
-            // Found the attribute, close scan and return
-            pscan.closescan(); // Close scan before returning successfully
-            return;
+              // *** ADD THIS LINE ***
+              // Set the header using the schema defined in the constructor
+              tuple.setHdr((short)9, attrs, str_sizes);
+              // *** END ADDED LINE ***
+
+              // Ensure record object is initialized before reading into it
+              if (record == null) {
+                  // This case should ideally be prevented by caller, but handle defensively
+                  record = new AttrDesc();
+              }
+              read_tuple(tuple, record);
+            }
+            catch (Exception e4) {
+              // Consider adding more specific exception handling if needed
+              // e4.printStackTrace(); // Optional logging
+              throw new AttrCatalogException(e4, "getNext, setHdr, or read_tuple failed in getInfo");
+            }
+
+            // Check if the current record matches
+            if ( record.relName != null && record.relName.equalsIgnoreCase(relation)==true
+                 && record.attrName != null && record.attrName.equalsIgnoreCase(attrName)==true )
+              {
+                // Found the attribute, return successfully (scan closed in finally)
+                return;
+              }
+          } // End while
+
+          // If loop finished without finding the attribute
+          throw new Catalogattrnotfound(null,"Catalog: Attribute '" + attrName + "' for relation '" + relation + "' not Found!");
+
+      } finally {
+          // Ensure scan is closed
+          if (pscan != null) {
+              pscan.closescan();
           }
       }
     };
@@ -285,90 +300,160 @@ public class AttrCatalog extends Heapfile
     }
   
   // RETURNS ATTRTYPE AND STRINGSIZE ARRAYS FOR CONSTRUCTING TUPLES
-  public int getTupleStructure(String relation, int attrCnt,
-			       AttrType [] typeArray, short [] sizeArray)
-    throws Catalogmissparam, 
-	   Catalogioerror, 
-	   Cataloghferror,
-	   AttrCatalogException, 
-	   IOException, 
-	   Catalognomem, 
-	   Catalogindexnotfound,
-	   Catalogattrnotfound, 
-	   Catalogrelnotfound
+  public int getTupleStructure(String relation, int attrCnt_unused, // Renamed attrCnt param
+                   AttrType [] typeArray, short [] sizeArray)
+    throws Catalogmissparam,
+       Catalogioerror,
+       Cataloghferror,
+       AttrCatalogException,
+       IOException,
+       Catalognomem,
+       Catalogindexnotfound,
+       Catalogattrnotfound,
+       Catalogrelnotfound
     {
-      int  status;
+      // int  status; // Unused
       int stringcount = 0;
-      AttrDesc [] attrs = null;
+      // AttrDesc [] attrs = null; // Old incorrect line
+      AttrDesc [] attrs; // Declare here, allocate after getting count
+      int actualAttrCnt = 0; // To store the actual count found
       int i, x;
-      
-      // GET ALL OF THE ATTRIBUTES
-      
+
+      // *** FIX 2: Check output array parameters ***
+      if (typeArray == null)
+          throw new Catalogmissparam(null, "MISSING_PARAM typeArray (output)");
+      // sizeArray can be null if there are no strings, handle later
+
+
+      // --- Get the actual attribute count from RelCatalog first ---
       try {
-	attrCnt = getRelInfo(relation, attrCnt, attrs);
+          RelDesc relDesc = new RelDesc();
+          ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(relation, relDesc);
+          actualAttrCnt = relDesc.attrCnt;
+      } catch (Catalogrelnotfound e_rel) {
+          System.err.println("Catalog: Relation '" + relation + "' not found in relcat!");
+          throw e_rel; // Re-throw
+      } catch (Exception e_relcat) {
+          System.err.println("Error getting info from RelCatalog: " + e_relcat);
+          throw new AttrCatalogException(e_relcat, "Failed to get relation info from relcat");
       }
+
+      // If relation has no attributes, handle appropriately
+      if (actualAttrCnt == 0) {
+          // Depending on requirements, you might return 0 or handle differently
+          // Ensure typeArray and sizeArray are consistent (e.g., empty or null)
+          return 0;
+      }
+
+      // *** Allocate the attrs array with the exact size ***
+      attrs = new AttrDesc[actualAttrCnt];
+
+
+      // GET ALL OF THE ATTRIBUTES by calling getRelInfo
+      try {
+        // Pass the allocated attrs array. getRelInfo will fill it.
+        // The second parameter to getRelInfo is unused, pass 0 or actualAttrCnt.
+        // getRelInfo internally verifies the count again, which is slightly redundant but safe.
+        int countFromGetRelInfo = getRelInfo(relation, actualAttrCnt, attrs);
+
+        // Optional: Verify consistency if needed
+        if (countFromGetRelInfo != actualAttrCnt) {
+             throw new AttrCatalogException(null, "Inconsistency between relcat count ("+actualAttrCnt+") and attrcat count ("+countFromGetRelInfo+") found by getRelInfo.");
+        }
+      }
+      // ... Keep existing catch blocks for getRelInfo errors ...
       catch (Catalogioerror e) {
-	System.err.println ("Catalog I/O Error!"+e);
-	throw new Catalogioerror(null, "");
+    System.err.println ("Catalog I/O Error!"+e);
+    throw new Catalogioerror(null, "");
       }
       catch (Cataloghferror e1) {
-	System.err.println ("Catalog Heapfile Error!"+e1);
-	throw new Cataloghferror(null, "");
+    System.err.println ("Catalog Heapfile Error!"+e1);
+    throw new Cataloghferror(null, "");
       }
       catch (Catalogmissparam e2) {
-	System.err.println ("Catalog Missing Param Error!"+e2);
-	throw new Catalogmissparam(null, "");
+    System.err.println ("Catalog Missing Param Error!"+e2);
+    throw new Catalogmissparam(null, "");
       }
-      catch (Catalogindexnotfound e3) {
-	System.err.println ("Catalog Index not Found!"+e3);
-	throw new Catalogindexnotfound(null, "");
-      }
+      // Catalogindexnotfound might not be thrown by the fixed getRelInfo
+      // catch (Catalogindexnotfound e3) {
+    // System.err.println ("Catalog Index not Found!"+e3);
+    // throw new Catalogindexnotfound(null, "");
+      // }
       catch (Catalogattrnotfound e4) {
-	System.err.println ("Catalog: Attribute not Found!"+e4);
-	throw new Catalogattrnotfound(null, "");
+    System.err.println ("Catalog: Attribute inconsistency found!"+e4); // Message adjusted
+    throw e4; // Re-throw
       }
-      catch (Catalogrelnotfound e5) {
-	System.err.println ("Catalog: Relation not Found!"+e5);
-	throw new Catalogrelnotfound(null, "");
+      catch (Catalogrelnotfound e5) { // Should have been caught earlier
+    System.err.println ("Catalog: Relation not Found!"+e5);
+    throw e5; // Re-throw
       }
-      
-      
-      // ALLOCATE TYPEARRAY
-      
-      typeArray = new AttrType[attrCnt];
-      if (typeArray == null)
-	throw new Catalognomem(null, "Catalog, No Enough Memory!");
-      
-      // LOCATE STRINGS
-      
-      for(i = 0; i < attrCnt; i++)
-	{
-	  if(attrs[i].attrType.attrType == AttrType.attrString)
-	    stringcount++;
-	}
-      
-      // ALLOCATE STRING SIZE ARRAY
-      
-      if(stringcount > 0) 
-	{
-	  sizeArray = new short[stringcount];
-	  if (sizeArray == null)
-	    throw new Catalognomem(null, "Catalog, No Enough Memory!");
-	}
-      
+      catch (Exception e_gen) { // Catch any other exceptions from getRelInfo
+        e_gen.printStackTrace();
+        throw new AttrCatalogException(e_gen, "getRelInfo failed within getTupleStructure");
+      }
+
+
+      // Check if the provided typeArray is large enough
+      if (typeArray.length < actualAttrCnt) {
+          throw new Catalognomem(null, "Provided typeArray is too small (" + typeArray.length + " < " + actualAttrCnt + ")");
+      }
+
+
+      // LOCATE STRINGS and count them
+      stringcount = 0; // Reset just in case
+      for(i = 0; i < actualAttrCnt; i++)
+    {
+      // *** FIX 3: Check for null entry in attrs array ***
+      if (attrs[i] == null) {
+          // This indicates getRelInfo didn't fill the array correctly
+          throw new AttrCatalogException(null, "Inconsistency: Null attribute found at position " + (i+1) + " after calling getRelInfo for relation " + relation);
+      }
+      if(attrs[i].attrType.attrType == AttrType.attrString)
+        stringcount++;
+    }
+
+
+      // VALIDATE/ALLOCATE STRING SIZE ARRAY
+      if(stringcount > 0)
+    {
+      // *** FIX 4: Check if sizeArray is provided and large enough ***
+      if (sizeArray == null) {
+          throw new Catalogmissparam(null, "MISSING_PARAM sizeArray (output) - required because strings exist");
+      }
+      if (sizeArray.length < stringcount) {
+          throw new Catalognomem(null, "Provided sizeArray is too small (" + sizeArray.length + " < " + stringcount + ")");
+      }
+      // sizeArray = new short[stringcount]; // DO NOT REALLOCATE PARAMETER
+    } else {
+      // If no strings, sizeArray is not needed (can be null or empty)
+      // No allocation or validation needed if stringcount is 0
+    }
+
+
       // FILL ARRAYS WITH TYPE AND SIZE DATA
-      
-      for(x = 0, i = 0; i < attrCnt; i++)
-	{
-	  typeArray[i].attrType= attrs[i].attrType.attrType;
-	  if(attrs[i].attrType.attrType == AttrType.attrString)
-	    {
-	      sizeArray[x] = (short) attrs[i].attrLen;
-	      x++;
-	    }
-	}
-      
-      return attrCnt;    
+      for(x = 0, i = 0; i < actualAttrCnt; i++)
+    {
+      // *** FIX 5: Ensure typeArray elements are initialized if needed ***
+      // Or assign directly if AttrType constructor handles it
+      if (typeArray[i] == null) typeArray[i] = new AttrType(AttrType.attrNull); // Initialize if null
+
+      typeArray[i].attrType= attrs[i].attrType.attrType;
+
+      if(attrs[i].attrType.attrType == AttrType.attrString)
+        {
+          // Ensure we don't write past the bounds of sizeArray
+          if (x < sizeArray.length) {
+              sizeArray[x] = (short) attrs[i].attrLen;
+              x++;
+          } else {
+              // This indicates an inconsistency if stringcount was calculated correctly
+              throw new AttrCatalogException(null, "Internal error: String count mismatch in getTupleStructure");
+          }
+        }
+    }
+
+      // Return the actual number of attributes found
+      return actualAttrCnt;
     };
   
   
@@ -427,17 +512,18 @@ public class AttrCatalog extends Heapfile
             try {
               tuple = pscan.getNext(rid); // <-- Use initialized rid
               if (tuple == null) {
-                // If scan ends without finding, throw not found
-                throw new Catalogattrnotfound(null, "Catalog: Attribute not Found!");
+                // If scan ends without finding, throw not found *after* the loop
+                break; // Exit loop if end of scan
               }
 
               // <-- FIX 3: Add setHdr -->
               tuple.setHdr((short)9, attrs, str_sizes);
 
+              // Ensure record object is initialized before reading into it
+              if (record == null) { // Defensive check
+                  record = new AttrDesc();
+              }
               read_tuple(tuple, record); // <-- Use initialized record
-            }
-            catch (Catalogattrnotfound e_nf) {
-                throw e_nf; // Re-throw the specific exception if scan ended
             }
             catch (Exception e4) {
               // e4.printStackTrace(); // Optional logging
@@ -445,8 +531,8 @@ public class AttrCatalog extends Heapfile
             }
 
             // Check if this is the record to delete
-            if ( record.relName.equalsIgnoreCase(relation)==true
-                 && record.attrName.equalsIgnoreCase(attrName)==true )
+            if ( record.relName != null && record.relName.equalsIgnoreCase(relation)==true
+                 && record.attrName != null && record.attrName.equalsIgnoreCase(attrName)==true )
               {
                 try {
                   deleteRecord(rid); // Use the rid obtained from getNext
@@ -454,10 +540,14 @@ public class AttrCatalog extends Heapfile
                 catch (Exception e3) {
                   throw new AttrCatalogException(e3, "deleteRecord failed");
                 }
-                // Successfully deleted, exit loop (and method via finally block)
+                // Successfully deleted, exit method (scan closed in finally)
                 return;
               }
           } // End while loop
+
+          // If loop finished without finding the attribute
+          throw new Catalogattrnotfound(null, "Catalog: Attribute '" + attrName + "' for relation '" + relation + "' not Found for removal!");
+
       } finally {
           // Ensure scan is closed, regardless of how the try block exits
           if (pscan != null) {
@@ -475,8 +565,22 @@ public class AttrCatalog extends Heapfile
   // Converts AttrDesc to tuple. 
   public void make_tuple(Tuple tuple, AttrDesc record)
     throws IOException,
-       AttrCatalogException
+       AttrCatalogException,
+       Catalogmissparam
     {
+      // Ensure tuple and record are not null
+      if (tuple == null || record == null) {
+          throw new Catalogmissparam(null, "Null parameter passed to make_tuple");
+      }
+      // Ensure sub-objects in record are not null if accessed
+      if (record.attrType == null) {
+          throw new Catalogmissparam(null, "AttrDesc record has null attrType in make_tuple");
+      }
+      // minVal/maxVal might be null depending on usage, handle defensively
+      // if (record.minVal == null) record.minVal = new attrData(); // Or throw error if required
+      // if (record.maxVal == null) record.maxVal = new attrData(); // Or throw error if required
+
+
       try {
         tuple.setStrFld(1, record.relName);
         tuple.setStrFld(2, record.attrName);
@@ -486,24 +590,24 @@ public class AttrCatalog extends Heapfile
         // *** FIX: Handle Vector type explicitly ***
         if (record.attrType.attrType == AttrType.attrString) {
           tuple.setIntFld(5, 0); // Code for String
-          tuple.setStrFld(8, record.minVal.strVal);
-          tuple.setStrFld(9, record.maxVal.strVal);
+          // Handle potential null min/max values if they aren't guaranteed
+          tuple.setStrFld(8, (record.minVal != null) ? record.minVal.strVal : ""); // Default to empty string if null
+          tuple.setStrFld(9, (record.maxVal != null) ? record.maxVal.strVal : ""); // Default to empty string if null
         } else if (record.attrType.attrType == AttrType.attrReal) {
           tuple.setIntFld(5, 1); // Code for Real
-          tuple.setFloFld(8,record.minVal.floatVal);
-          // *** BUG FIX: Should be maxVal for field 9 ***
-          tuple.setFloFld(9,record.maxVal.floatVal);
+          tuple.setFloFld(8, (record.minVal != null) ? record.minVal.floatVal : 0.0f); // Default to 0.0f if null
+          tuple.setFloFld(9, (record.maxVal != null) ? record.maxVal.floatVal : 0.0f); // Default to 0.0f if null
         } else if (record.attrType.attrType == AttrType.attrInteger) {
           tuple.setIntFld(5, 2); // Code for Integer
-          tuple.setIntFld(8,record.minVal.intVal);
-          tuple.setIntFld(9,record.maxVal.intVal);
+          tuple.setIntFld(8, (record.minVal != null) ? record.minVal.intVal : 0); // Default to 0 if null
+          tuple.setIntFld(9, (record.maxVal != null) ? record.maxVal.intVal : 0); // Default to 0 if null
         } else if (record.attrType.attrType == AttrType.attrVector100D) { // Assuming attrVector100D exists
           tuple.setIntFld(5, 3); // Code for Vector (Use 3 or another unused code)
           // Min/Max for vectors might not be stored or meaningful here
           // Set placeholder or handle appropriately if needed
           // Example: Store 0 or a specific marker if not used
-          tuple.setIntFld(8, 0); // Placeholder for minVal
-          tuple.setIntFld(9, 0); // Placeholder for maxVal
+          tuple.setIntFld(8, 0); // Placeholder for minVal (assuming stored as int)
+          tuple.setIntFld(9, 0); // Placeholder for maxVal (assuming stored as int)
         } else {
             // Handle unknown type? Throw exception?
             throw new AttrCatalogException(null, "Unknown attribute type in make_tuple: " + record.attrType.attrType);
@@ -514,6 +618,7 @@ public class AttrCatalog extends Heapfile
         tuple.setIntFld(7, record.indexCnt);
       }
       catch (Exception e1) {
+        // e1.printStackTrace(); // Optional logging
         throw new AttrCatalogException(e1, "make_tuple failed");
       }
     };
@@ -525,8 +630,14 @@ public class AttrCatalog extends Heapfile
   
   public void read_tuple(Tuple tuple, AttrDesc record)
     throws IOException,
-       AttrCatalogException
+       AttrCatalogException,
+       Catalogmissparam
     {
+      // Ensure tuple and record are not null
+      if (tuple == null || record == null) {
+          throw new Catalogmissparam(null, "Null parameter passed to read_tuple");
+      }
+
       try {
         record.relName = tuple.getStrFld(1);
         record.attrName = tuple.getStrFld(2);
@@ -534,7 +645,7 @@ public class AttrCatalog extends Heapfile
         record.attrPos = tuple.getIntFld(4);
 
         int temp;
-        temp = tuple.getIntFld(5);
+        temp = tuple.getIntFld(5); // Get the type code
 
         // *** FIX: Handle Vector type explicitly ***
         if (temp == 0) { // String
@@ -559,10 +670,13 @@ public class AttrCatalog extends Heapfile
         } else if (temp == 3) { // Vector (Using 3 as the code)
           record.attrType = new AttrType(AttrType.attrVector100D); // Assuming attrVector100D exists
           // Read placeholder min/max if stored, or ignore if not meaningful
+          // Ensure minVal/maxVal are initialized if you intend to read into them
           if (record.minVal == null) record.minVal = new attrData();
           if (record.maxVal == null) record.maxVal = new attrData();
-          // Example: record.minVal.intVal = tuple.getIntFld(8); // If stored as int placeholder
-          // Example: record.maxVal.intVal = tuple.getIntFld(9); // If stored as int placeholder
+          // Example: Read integer placeholders if that's how they were stored
+          // record.minVal.intVal = tuple.getIntFld(8);
+          // record.maxVal.intVal = tuple.getIntFld(9);
+          // If min/max aren't stored for vectors, you might skip reading fields 8 & 9 here.
         } else {
           // Handle unknown type code? Throw exception?
           throw new AttrCatalogException(null, "Unknown attribute type code in read_tuple: " + temp);
@@ -573,6 +687,7 @@ public class AttrCatalog extends Heapfile
         record.indexCnt = tuple.getIntFld(7);
       }
       catch (Exception e1) {
+        // e1.printStackTrace(); // Optional logging
         throw new AttrCatalogException(e1, "read_tuple failed");
       }
     }

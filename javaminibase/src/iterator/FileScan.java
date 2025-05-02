@@ -116,28 +116,74 @@ public class FileScan extends  Iterator
    */
   public Tuple get_next()
     throws JoinsException,
-	   IOException,
-	   InvalidTupleSizeException,
-	   InvalidTypeException,
-	   PageNotReadException, 
-	   PredEvalException,
-	   UnknowAttrType,
-	   FieldNumberOutOfBoundException,
-	   WrongPermat
-    {     
+       IOException,
+       InvalidTupleSizeException,
+       InvalidTypeException,
+       PageNotReadException,
+       PredEvalException,
+       UnknowAttrType,
+       FieldNumberOutOfBoundException,
+       WrongPermat
+    {
       RID rid = new RID();;
-      
+
       while(true) {
-	if((tuple1 =  scan.getNext(rid)) == null) {
-	  return null;
-	}
-	
-	tuple1.setHdr(in1_len, _in1, s_sizes);
-	if (PredEval.Eval(OutputFilter, tuple1, null, _in1, null) == true){
-	  Projection.Project(tuple1, _in1,  Jtuple, perm_mat, nOutFlds); 
-	  return  Jtuple;
-	}        
-      }
+        // *** DEBUG POINT 1: Is the underlying heap scan returning tuples? ***
+        System.out.println("DEBUG: FileScan.get_next() - Calling heap scan getNext..."); // ADD THIS
+        if((tuple1 =  scan.getNext(rid)) == null) {
+          System.out.println("DEBUG: FileScan.get_next() - Heap scan returned null. End of scan."); // ADD THIS
+          return null; // End of scan
+        }
+        System.out.println("DEBUG: FileScan.get_next() - Heap scan returned a tuple."); // ADD THIS
+
+        // *** DEBUG POINT 2: Is the header being set correctly? ***
+        // This is crucial for PredEval to read fields correctly.
+        try {
+            tuple1.setHdr(in1_len, _in1, s_sizes);
+            System.out.println("DEBUG: FileScan.get_next() - Set header on tuple."); // ADD THIS
+        } catch (Exception e) {
+            System.err.println("ERROR: FileScan.get_next() - Exception setting header: " + e.getMessage()); // ADD THIS
+            e.printStackTrace();
+            // Decide how to handle header error - maybe continue to next tuple?
+            continue; // Skip this tuple if header fails
+        }
+
+        // *** DEBUG POINT 3: Is PredEval being called and what does it return? ***
+        boolean evalResult = false; // Default to false
+        if (OutputFilter != null) { // Check if there's actually a filter
+            try {
+                System.out.println("DEBUG: FileScan.get_next() - Calling PredEval.Eval..."); // ADD THIS
+                evalResult = PredEval.Eval(OutputFilter, tuple1, null, _in1, null);
+                System.out.println("DEBUG: FileScan.get_next() - PredEval.Eval result: " + evalResult); // ADD THIS
+            } catch (Exception e) {
+                System.err.println("ERROR: FileScan.get_next() - Exception during PredEval: " + e.getMessage()); // ADD THIS
+                e.printStackTrace();
+                // Continue to next tuple if evaluation fails for some reason
+                continue;
+            }
+        } else {
+            evalResult = true; // No filter means the tuple passes
+            System.out.println("DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true."); // ADD THIS
+        }
+
+        if (evalResult == true){ // Check the result of PredEval
+          // *** DEBUG POINT 4: Is projection happening? ***
+          try {
+              System.out.println("DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project..."); // ADD THIS
+              Projection.Project(tuple1, _in1,  Jtuple, perm_mat, nOutFlds);
+              System.out.println("DEBUG: FileScan.get_next() - Projection successful. Returning tuple."); // ADD THIS
+              return  Jtuple; // Return the projected tuple
+          } catch (Exception e) {
+              System.err.println("ERROR: FileScan.get_next() - Exception during Projection: " + e.getMessage()); // ADD THIS
+              e.printStackTrace();
+              // Continue loop to get next tuple if projection fails
+              continue;
+          }
+        } else {
+             System.out.println("DEBUG: FileScan.get_next() - Predicate failed. Continuing loop."); // ADD THIS
+            // Predicate failed, loop continues automatically
+        }
+      } // End while(true)
     }
 
   /**

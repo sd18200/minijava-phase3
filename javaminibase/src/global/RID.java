@@ -3,6 +3,7 @@
 package global;
 
 import java.io.*;
+import java.util.Objects;
 
 /** class RID
  */
@@ -58,13 +59,40 @@ public class RID implements Serializable{
    * @return true is they are equal
    *         false if not.
    */
-  public boolean equals(RID rid) {
-    
-    if ((this.pageNo.pid==rid.pageNo.pid)
-	&&(this.slotNo==rid.slotNo))
-      return true;
-    else
-      return false;
+  @Override // Add Override annotation
+  public boolean equals(Object obj) {
+    // 1. Check for self comparison
+    if (this == obj) return true;
+
+    // 2. Check for null and correct type
+    if (obj == null || getClass() != obj.getClass()) return false;
+
+    // 3. Cast to RID
+    RID other = (RID) obj;
+
+    // 4. Compare fields (handle potential null pageNo)
+    // Use Objects.equals for null-safe comparison of pageNo.pid
+    boolean pageEquals = (this.pageNo == null && other.pageNo == null) ||
+                         (this.pageNo != null && other.pageNo != null && this.pageNo.pid == other.pageNo.pid);
+
+    return pageEquals && this.slotNo == other.slotNo;
+  }
+
+    @Override // Add Override annotation
+  public int hashCode() {
+    // Use Objects.hash for a convenient way to generate hash code
+    // Include pid from pageNo (handle null pageNo)
+    int pagePid = (pageNo != null) ? pageNo.pid : 0; // Use 0 or another default if pageNo is null
+    return Objects.hash(pagePid, slotNo);
+  }
+
+  /**
+   * Returns a string representation of the RID.
+   * @return String representation like "[pageNo, slotNo]"
+   */
+  @Override
+  public String toString() {
+      return "[" + ((pageNo != null) ? pageNo.pid : "null") + ", " + slotNo + "]";
   }
   
 }

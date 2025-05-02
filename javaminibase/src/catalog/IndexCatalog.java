@@ -17,31 +17,32 @@ import btree.*;
 public class IndexCatalog extends Heapfile
   implements GlobalConst, Catalogglobal
 {
-  
+  private static final short NUM_FIELDS = 8;
   // OPEN INDEX CATALOG
   IndexCatalog(String filename)
-    throws IOException, 
-	   BufMgrException,
-	   DiskMgrException,
-	   Exception
+    throws IOException,
+       BufMgrException,
+       DiskMgrException,
+       Exception
          {
             // Call the Heapfile constructor
             super(filename); // This MUST be the first line
-      
+
             // *** ADD DEBUG LOGGING ***
             System.out.println("DEBUG: IndexCatalog constructor - AFTER super(filename) call for: " + filename);
-      
+
             try {
                 // Initialize the tuple member variable
                 tuple = new Tuple(Tuple.max_size);
                 if (tuple == null) { // Check immediately after creation
                     System.err.println("CRITICAL ERROR: IndexCatalog constructor - tuple is NULL immediately after new Tuple()!");
+                    throw new RuntimeException("Failed to allocate Tuple in IndexCatalog constructor"); // Fail fast
                 } else {
                     System.out.println("DEBUG: IndexCatalog constructor - AFTER tuple = new Tuple(). Tuple is NOT null.");
                 }
-      
+
                 // Initialize schema arrays
-                attrs = new AttrType[7];
+                attrs = new AttrType[NUM_FIELDS]; // Use NUM_FIELDS
                 attrs[0] = new AttrType(AttrType.attrString); // relName
                 attrs[1] = new AttrType(AttrType.attrString); // attrName
                 attrs[2] = new AttrType(AttrType.attrInteger); // accessType
@@ -49,404 +50,448 @@ public class IndexCatalog extends Heapfile
                 attrs[4] = new AttrType(AttrType.attrInteger); // clustered
                 attrs[5] = new AttrType(AttrType.attrInteger); // distinctKeys
                 attrs[6] = new AttrType(AttrType.attrInteger); // indexPages
-      
-                str_sizes = new short[2];
+                attrs[7] = new AttrType(AttrType.attrString); // physicalFileName <-- ADDED
+
+                str_sizes = new short[3]; // Increase size to 3
                 str_sizes[0] = (short)MAXNAME; // relName
                 str_sizes[1] = (short)MAXNAME; // attrName
-      
+                // *** IMPORTANT: Ensure MAXFILENAME is large enough in GlobalConst.java ***
+                // If MAXFILENAME is only 15, this will likely truncate filenames.
+                str_sizes[2] = (short)MAXFILENAME; // physicalFileName <-- ADDED
+
                 // Set the header for the tuple
-                tuple.setHdr((short) 7, attrs, str_sizes);
+                tuple.setHdr(NUM_FIELDS, attrs, str_sizes); // Use NUM_FIELDS
                 System.out.println("DEBUG: IndexCatalog constructor - AFTER tuple.setHdr().");
-      
+
                 size = tuple.size(); // Set the size based on the header
-      
+
             } catch (Exception e) {
                 System.err.println("CRITICAL ERROR: Exception during IndexCatalog tuple/header initialization!");
                 e.printStackTrace();
                 // Rethrow or handle appropriately - this object might be unusable
                 throw new RuntimeException("Failed to initialize IndexCatalog tuple/header", e);
             }
-      
+
             System.out.println("DEBUG: IndexCatalog constructor - COMPLETED for: " + filename);
             // *** END DEBUG LOGGING ***
           }
   
   // GET ALL INDEXES FOR A RELATION
   // Return indexCnt.
-  public int getRelInfo(String relation, int indexCnt, IndexDesc [] indexes)
-    throws Catalogmissparam, 
-	   Catalogioerror, 
-	   Cataloghferror, 
-	   Catalogindexnotfound,
-	   IOException, 
-	   Catalognomem, 
-	   Catalogattrnotfound,
-	   IndexCatalogException,
-	   RelCatalogException,
-	   Catalogrelnotfound
+  public int getRelInfo(String relation, int indexCnt_unused, IndexDesc [] indexes)
+    throws Catalogmissparam, Catalogioerror, Cataloghferror, Catalogindexnotfound,
+           IOException, Catalognomem, Catalogattrnotfound, IndexCatalogException,
+           RelCatalogException, Catalogrelnotfound
     {
-      RelDesc record = null;
-      int status;
-      int recSize;
-      RID rid = null;
+      RelDesc record = new RelDesc();
+      RID rid = new RID();
       Scan pscan = null;
       int count = 0;
-      
-      if (relation == null)
-	throw new Catalogmissparam(null, "MISSING_PARAM");
-      
+      int actualIndexCnt = 0;
+
+       if (relation == null) throw new Catalogmissparam(null, "MISSING_PARAM relation");
+       if (indexes == null) throw new Catalogmissparam(null, "MISSING_PARAM indexes array (output)");
+       try {
+         ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(relation, record);
+         actualIndexCnt = record.indexCnt;
+       } catch (Exception e_rel) {
+           throw new IndexCatalogException(e_rel, "RelCatalog.getInfo failed within IndexCatalog.getRelInfo");
+       }
+       if (actualIndexCnt == 0) return 0;
+       if (indexes.length < actualIndexCnt) {
+           throw new Catalognomem(null, "Provided indexes array is too small (" + indexes.length + " < " + actualIndexCnt + ")");
+       }
+      // --- Scan the IndexCatalog heapfile ---
       try {
-	ExtendedSystemDefs.MINIBASE_RELCAT.getInfo(relation, record);
+          try {
+            pscan = new Scan(this);
+          } catch (Exception e) {
+            throw new IndexCatalogException(e,"scan() failed");
+          }
+
+          count = 0;
+          IndexDesc tempIndexRec = new IndexDesc();
+          Tuple currentTuple = null; // Use a local Tuple for reading
+
+          while(true)
+            {
+              try {
+                currentTuple = pscan.getNext(rid);
+                if (currentTuple == null) {
+                  break; // End of scan
+                }
+
+                // Set header on the local tuple
+                if (this.attrs == null || this.str_sizes == null) {
+                    throw new IndexCatalogException(null, "Internal error: IndexCatalog schema (attrs/str_sizes) not initialized.");
+                }
+                // *** Use NUM_FIELDS ***
+                currentTuple.setHdr(NUM_FIELDS, this.attrs, this.str_sizes);
+
+                // Read from the local tuple into tempIndexRec
+                read_tuple(currentTuple, tempIndexRec);
+              }
+              catch (Exception e4) {
+                throw new IndexCatalogException(e4,"getNext, setHdr, or read_tuple() failed");
+              }
+
+              // Check if the found index belongs to the target relation
+              if(tempIndexRec.relName != null && tempIndexRec.relName.equalsIgnoreCase(relation)==true)
+                {
+                  if (count < indexes.length) {
+                      // Deep copy needed for the output array
+                      indexes[count] = new IndexDesc();
+                      indexes[count].relName = new String(tempIndexRec.relName);
+                      indexes[count].attrName = new String(tempIndexRec.attrName);
+                      if (tempIndexRec.accessType == null || tempIndexRec.order == null) {
+                          throw new IndexCatalogException(null, "Inconsistent data: Null accessType or order found.");
+                      }
+                      indexes[count].accessType = new IndexType(tempIndexRec.accessType.indexType);
+                      indexes[count].order = new TupleOrder(tempIndexRec.order.tupleOrder);
+                      indexes[count].clustered = tempIndexRec.clustered;
+                      indexes[count].distinctKeys = tempIndexRec.distinctKeys;
+                      indexes[count].indexPages = tempIndexRec.indexPages;
+                      // *** Deep copy physicalFileName ***
+                      indexes[count].physicalFileName = (tempIndexRec.physicalFileName != null) ? new String(tempIndexRec.physicalFileName) : null;
+                      count++;
+                  } else {
+                      System.err.println("Warning: Found more indexes for relation " + relation + " than expected (" + actualIndexCnt + ")");
+                      break; // Avoid array out of bounds
+                  }
+                }
+            } // End while
+
+            if (count != actualIndexCnt) {
+                // This might indicate an inconsistency between relcat and indexcat
+                 System.err.println("Warning: Expected " + actualIndexCnt + " indexes for relation '" + relation + "' based on relcat, but found " + count + " in indexcat.");
+                // Depending on requirements, you might throw Catalogindexnotfound or just return count
+                // throw new Catalogindexnotfound(null, "Expected " + actualIndexCnt + " indexes for relation '" + relation + "' based on relcat, but found " + count + " in indexcat.");
+            }
+
+      } finally {
+            if (pscan != null) {
+                pscan.closescan();
+            }
       }
-      catch (Catalogioerror e) {
-	System.err.println ("Catalog I/O Error!"+e);
-	throw new Catalogioerror(null, "");
-      }
-      catch (Cataloghferror e1) {
-	System.err.println ("Catalog Heapfile Error!"+e1);
-	throw new Cataloghferror(null, "");
-      }
-      catch (Catalogmissparam e2) {
-	System.err.println ("Catalog Missing Param Error!"+e2);
-	throw new Catalogmissparam(null, "");
-      }
-      catch (Catalogrelnotfound e3) {
-	System.err.println ("Catalog: Relation not Found!"+e3);
-	throw new Catalogrelnotfound(null, "");
-      }
-      
-      // SET INDEX COUNT BY REFERENCE 
-      
-      indexCnt = record.indexCnt;
-      
-      if (indexCnt == 0)
-	return indexCnt;
-      
-      
-      // OPEN SCAN
-      
-      try {
-	pscan = new Scan(this);
-      }
-      catch (Exception e) {
-	throw new IndexCatalogException(e,"scan() failed");
-      }
-      
-      // ALLOCATE INDEX ARRAY
-      
-      indexes = new IndexDesc[indexCnt];
-      if (indexes == null)
-	throw new Catalognomem(null, "Catalog: No Enough Memory!");
-      
-      // SCAN THE FILE
-      
-      while(true) 
-	{
-	  try {
-	    tuple = pscan.getNext(rid);
-	    if (tuple == null) 
-	      throw new Catalogindexnotfound(null,
-					     "Catalog: Index not Found!");
-	    read_tuple(tuple, indexes[count]);
-	  }
-	  catch (Exception e4) {
-	    throw new IndexCatalogException(e4," read_tuple() failed");
-	  }
-	  
-	  if(indexes[count].relName.equalsIgnoreCase(relation)==true)
-	    count++;
-	  
-	  if(count == indexCnt)  // IF ALL INDEXES FOUND
-	    break;
-	}
-      
-      return indexCnt;
-      
+      return count; // Return the actual number found and copied
     };
   
-  // RETURN INFO ON AN INDEX
+
+
+
+      // RETURN INFO ON AN INDEX
   public void getInfo(String relation, String attrName,
               IndexType accessType, IndexDesc record)
-    throws Catalogmissparam,
-       Catalogioerror, // Keep if Scan throws it
-       Cataloghferror, // Keep if Scan throws it
-       IOException,
-       Catalogindexnotfound, // *** FIX: Throw this on not found ***
-       IndexCatalogException // Use this for internal errors
+    throws Catalogmissparam, Catalogioerror, Cataloghferror, IOException,
+           Catalogindexnotfound, IndexCatalogException
     {
-      // int recSize; // Unused
-      RID rid = new RID(); // *** FIX: Initialize RID ***
+      if (relation == null || attrName == null || accessType == null || record == null)
+        throw new Catalogmissparam(null, "MISSING_PARAM in getInfo");
+
+      RID rid = new RID();
       Scan pscan = null;
-      boolean indexFound = false; // Flag to track if index is found
+      boolean indexFound = false;
 
-      // Check parameters
-      if ((relation == null)||(attrName == null)||(record == null)) // Added record null check
-    throw new Catalogmissparam(null, "MISSING_PARAM in IndexCatalog.getInfo");
-
-      // Ensure record's internal types are initialized if needed by read_tuple
-      // (Assuming IndexDesc constructor or caller handles this)
-      // record.accessType = new IndexType(IndexType.None); // Example if needed
-      // record.order = new TupleOrder(TupleOrder.Ascending); // Example if needed
-
-      try { // *** FIX: Use try-finally for scan ***
-          // OPEN SCAN
+      try {
           try {
-            pscan = new Scan(this); // 'this' is the IndexCatalog heapfile
-          }
-          catch (Exception e1) { // Catch specific exceptions like IOException, HFException etc. if possible
-            // e1.printStackTrace(); // Optional logging
-            throw new IndexCatalogException(e1, "Scan failed on indexcat");
+            pscan = new Scan(this);
+          } catch (Exception e1) {
+            throw new IndexCatalogException(e1, "Scan construction failed in getInfo");
           }
 
-          // SCAN FILE
+          Tuple currentTuple = null; // Use a local Tuple for reading
+
           while (true)
             {
               try {
-                // Use the member variable 'tuple' declared in IndexCatalog class
-                tuple = pscan.getNext(rid);
-                if (tuple == null) {
-                  // *** FIX: End of scan, break loop ***
-                  break;
-                }
-
-                // *** FIX: Set header before reading (using schema from constructor) ***
-                tuple.setHdr((short)7, attrs, str_sizes);
-
-                // *** FIX: Read into the provided record object ***
-                read_tuple(tuple, record); // Assumes read_tuple handles potential nulls in record's members
+                currentTuple = pscan.getNext(rid);
+              } catch (Exception e_next) {
+                  throw new IndexCatalogException(e_next, "pscan.getNext(rid) failed in getInfo");
               }
-              catch (Exception e4) { // Catch specific exceptions if possible
-                // e4.printStackTrace(); // Optional logging
-                throw new IndexCatalogException(e4, "read_tuple or getNext failed during indexcat scan");
+
+              if (currentTuple == null) {
+                  break; // End of scan
+              }
+
+              try {
+                if (this.attrs == null || this.str_sizes == null) {
+                   throw new IndexCatalogException(null, "Internal Error: IndexCatalog schema (attrs/str_sizes) is null in getInfo!");
+                }
+                // *** Use NUM_FIELDS ***
+                currentTuple.setHdr(NUM_FIELDS, this.attrs, this.str_sizes);
+              } catch (Exception e_hdr) {
+                  throw new IndexCatalogException(e_hdr, "tuple.setHdr() failed in getInfo");
+              }
+
+              try {
+                // Initialize sub-objects if null before reading into them
+                if (record.accessType == null) record.accessType = new IndexType(IndexType.None);
+                if (record.order == null) record.order = new TupleOrder(TupleOrder.Ascending);
+                read_tuple(currentTuple, record);
+              } catch (Exception e_read) {
+                  throw new IndexCatalogException(e_read, "read_tuple call failed in getInfo");
               }
 
               // Check if this record matches the requested index
-              // *** FIX: Compare types correctly and add null checks ***
-              if(record.relName != null && record.attrName != null && record.accessType != null && // Null checks
-                 record.relName.equalsIgnoreCase(relation)==true
-                 && record.attrName.equalsIgnoreCase(attrName)==true
-                 && (record.accessType.indexType == accessType.indexType)) // Compare type values
+              if(record.relName != null && record.attrName != null && record.accessType != null &&
+                 record.relName.equalsIgnoreCase(relation)==true &&
+                 record.attrName.equalsIgnoreCase(attrName)==true &&
+                 (record.accessType.indexType == accessType.indexType))
                 {
                   indexFound = true; // FOUND
                   break; // Exit the loop
                 }
             } // End While
 
-            // *** FIX: Check flag after loop ***
             if (!indexFound) {
-                // If loop finished and index was not found, throw Catalogindexnotfound
-                throw new Catalogindexnotfound(null,"Catalog: Index not Found for " + relation + "." + attrName);
+                throw new Catalogindexnotfound(null,"Catalog: Index not Found for " + relation + "." + attrName + " with type " + accessType.indexType);
             }
-            // If indexFound is true, the 'record' object is already populated by read_tuple
 
       } finally {
-          // *** FIX: Ensure scan is closed ***
           if (pscan != null) {
               pscan.closescan();
           }
       }
-      // No explicit return needed for void method
     };
   
   // GET ALL INDEXES INLUDING A SPECIFIED ATTRIBUTE
   public int getAttrIndexes(String relation,
-			    String attrName, int indexCnt, IndexDesc [] indexes)
-    throws Catalogmissparam, 
-	   Catalogioerror, 
-	   Cataloghferror,
-	   IOException, 
-	   Catalognomem,
-	   Catalogindexnotfound,
-	   Catalogattrnotfound,
-	   IndexCatalogException
+                String attrName, int indexCnt_unused, IndexDesc [] indexes)
+    throws Catalogmissparam, Catalogioerror, Cataloghferror, IOException,
+           Catalognomem, Catalogindexnotfound, Catalogattrnotfound, IndexCatalogException
     {
-      AttrDesc record = null;
-      int status;
-      int recSize;
-      RID rid = null;
+      AttrDesc attrRec = new AttrDesc();
+      RID rid = new RID();
       Scan pscan = null;
       int count = 0;
-      
-      if (relation == null)
-	throw new Catalogmissparam(null, "MISSING_PARAM");
-      
+      int actualIndexCnt = 0;
+
+       if (relation == null || attrName == null) throw new Catalogmissparam(null, "MISSING_PARAM relation or attrName");
+       if (indexes == null) throw new Catalogmissparam(null, "MISSING_PARAM indexes array (output)");
+       try {
+         ExtendedSystemDefs.MINIBASE_ATTRCAT.getInfo(relation, attrName, attrRec);
+         actualIndexCnt = attrRec.indexCnt;
+       } catch (Exception e4) {
+           throw new IndexCatalogException (e4,"AttrCatalog.getInfo() failed within getAttrIndexes");
+       }
+       if(actualIndexCnt == 0) return 0;
+       if (indexes.length < actualIndexCnt) {
+           throw new Catalognomem(null, "Provided indexes array is too small (" + indexes.length + " < " + actualIndexCnt + ")");
+       }
+      // --- Scan IndexCatalog ---
       try {
-	ExtendedSystemDefs.MINIBASE_ATTRCAT.getInfo(relation, attrName, record);
+          try {
+            pscan = new Scan(this);
+          } catch (Exception e) {
+            throw new IndexCatalogException(e,"scan failed");
+          }
+
+          count = 0;
+          IndexDesc tempIndexRec = new IndexDesc();
+          Tuple currentTuple = null; // Use a local Tuple for reading
+
+          while(true)
+            {
+              try {
+                currentTuple = pscan.getNext(rid);
+                if (currentTuple == null) {
+                  break; // End of scan
+                }
+
+                if (this.attrs == null || this.str_sizes == null) {
+                    throw new IndexCatalogException(null, "Internal error: IndexCatalog schema not initialized.");
+                }
+                // *** Use NUM_FIELDS ***
+                currentTuple.setHdr(NUM_FIELDS, this.attrs, this.str_sizes);
+
+                read_tuple(currentTuple, tempIndexRec);
+              }
+              catch (Exception e4) {
+                throw new IndexCatalogException(e4, "getNext, setHdr, or read_tuple() failed");
+              }
+
+              // Check if it matches the relation and attribute
+              if(tempIndexRec.relName != null && tempIndexRec.attrName != null &&
+                 tempIndexRec.relName.equalsIgnoreCase(relation)==true &&
+                 tempIndexRec.attrName.equalsIgnoreCase(attrName)==true)
+                {
+                  if (count < indexes.length) {
+                      // Deep copy needed
+                      indexes[count] = new IndexDesc();
+                      indexes[count].relName = new String(tempIndexRec.relName);
+                      indexes[count].attrName = new String(tempIndexRec.attrName);
+                      if (tempIndexRec.accessType == null || tempIndexRec.order == null) {
+                          throw new IndexCatalogException(null, "Inconsistent data: Null accessType or order found.");
+                      }
+                      indexes[count].accessType = new IndexType(tempIndexRec.accessType.indexType);
+                      indexes[count].order = new TupleOrder(tempIndexRec.order.tupleOrder);
+                      indexes[count].clustered = tempIndexRec.clustered;
+                      indexes[count].distinctKeys = tempIndexRec.distinctKeys;
+                      indexes[count].indexPages = tempIndexRec.indexPages;
+                      // *** Deep copy physicalFileName ***
+                      indexes[count].physicalFileName = (tempIndexRec.physicalFileName != null) ? new String(tempIndexRec.physicalFileName) : null;
+                      count++;
+                  } else {
+                      System.err.println("Warning: Found more indexes for " + relation + "." + attrName + " than expected (" + actualIndexCnt + ")");
+                      break; // Avoid array out of bounds
+                  }
+                }
+            } // End while
+
+            if (count != actualIndexCnt) {
+                // This might indicate an inconsistency between attrcat and indexcat
+                System.err.println("Warning: Expected " + actualIndexCnt + " indexes for " + relation + "." + attrName + " based on attrcat, but found " + count + " in indexcat.");
+                // Depending on requirements, you might throw Catalogindexnotfound or just return count
+                // throw new Catalogindexnotfound(null, "Expected " + actualIndexCnt + " indexes for " + relation + "." + attrName + " based on attrcat, but found " + count + " in indexcat.");
+            }
+
+      } finally {
+          if (pscan != null) {
+              pscan.closescan();
+          }
       }
-      catch (Catalogioerror e) {
-	throw e;
-      }
-      catch (Cataloghferror e1) {
-	throw e1;
-      }
-      catch (Catalogmissparam e2) {
-	throw e2;
-      }
-      catch (Catalogattrnotfound e3) {
-	throw e3;
-      }
-      catch (Exception e4) {
-	throw new IndexCatalogException (e4,"getInfo() failed");
-      }
-      
-      // ASSIGN INDEX COUNT
-      
-      indexCnt = record.indexCnt;
-      if(indexCnt == 0)
-	return 0;
-      
-      // OPEN SCAN
-      
-      try {
-	pscan = new Scan(this);
-      }
-      catch (Exception e) {
-	throw new IndexCatalogException(e,"scan failed");
-      }
-      
-      // ALLOCATE INDEX ARRAY
-      
-      indexes = new IndexDesc[indexCnt];
-      if (indexes == null)
-	throw new Catalognomem(null, "Catalog: No Enough Memory!");
-      
-      // SCAN FILE
-      
-      while(true) 
-	{
-	  try {
-	    tuple = pscan.getNext(rid);
-	    if (tuple == null) 
-	      throw new Catalogindexnotfound(null,
-					     "Catalog: Index not Found!");
-	    read_tuple(tuple, indexes[count]);
-	  }
-	  catch (Exception e4) {
-	    throw new IndexCatalogException(e4, "pascan.getNext() failed");
-	  }
-	  
-	  if(indexes[count].relName.equalsIgnoreCase(relation)==true 
-	     && indexes[count].attrName.equalsIgnoreCase(attrName)==true)
-	    count++;
-	  
-	  if(count == indexCnt)  // if all indexes found
-	    break; 
-	}
-      
-      return indexCnt;    
+      return count; // Return the actual number found and copied
     };
   
   // CREATES A FILE NAME FOR AN INDEX 
   public String buildIndexName(String relation, String attrName,
-			       IndexType accessType)
+                   IndexType accessType)
     {
       String accessName = null;
       int sizeName;
       int sizeOfByte = 1;
       String indexName = null;
-      
+
       // DETERMINE INDEX TYPE
-      
       if(accessType.indexType == IndexType.B_Index)
-	accessName = new String("B_Index");
+        accessName = new String("B_Index");
       else if(accessType.indexType == IndexType.Hash)
-	accessName = new String("Hash");
-      
-      // CHECK FOR LEGIT NAME SIZE
-      
-      sizeName = relation.length() + accessName.length() +
-	attrName.length() + (3 * sizeOfByte);
-      
-      //if(sizeName > MAXNAME)
-      //    return MINIBASE_FIRST_ERROR( CATALOG, Catalog::INDEX_NAME_TOO_LONG );
-      
-      // CREATE NAME
-      
-      indexName = new String(relation);
-      indexName = indexName.concat("-");
-      indexName = indexName.concat(accessName);
-      indexName = indexName.concat("-");
-      indexName = indexName.concat(attrName);
-      
-      return indexName;    
+        accessName = new String("Hash");
+      // LSH index names are generated differently (in createIndex) and stored, not built here.
+
+      // CHECK FOR LEGIT NAME SIZE (Only relevant for BTree/Hash now)
+      if (accessName != null) {
+          sizeName = relation.length() + accessName.length() +
+            attrName.length() + (3 * sizeOfByte); // 3 hyphens
+
+          // Check if combined length exceeds MAXNAME (or a more appropriate limit)
+          // if(sizeName > MAXNAME) {
+          //    System.err.println("Warning: Generated index name might exceed MAXNAME limit.");
+          //    // Consider throwing an exception or truncating if necessary
+          // }
+
+          // CREATE NAME
+          indexName = new String(relation);
+          indexName = indexName.concat("-");
+          indexName = indexName.concat(accessName);
+          indexName = indexName.concat("-");
+          indexName = indexName.concat(attrName);
+      } else {
+          // Handle cases where accessType is not BTree or Hash if needed.
+          // For LSH, this method shouldn't ideally be called to get the *storage* name.
+          // Returning null might be appropriate if called for LSH.
+      }
+
+      return indexName;
     };
   
   // ADD INDEX ENTRY TO CATALOG
   public void addInfo(IndexDesc record)
     throws IOException,
-	   IndexCatalogException
+       IndexCatalogException
     {
-      RID rid;
-      
+      RID rid; // rid is not actually used here, but declared in original
+
+      // Check if the member tuple is initialized
+      if (this.tuple == null) {
+          throw new IndexCatalogException(null, "Internal error: IndexCatalog member 'tuple' not initialized in addInfo.");
+      }
+
       try {
-	make_tuple(tuple, record);
+        make_tuple(this.tuple, record); // Use the member tuple
       }
       catch (Exception e4) {
-	throw new IndexCatalogException(e4, "make_tuple failed");
+        throw new IndexCatalogException(e4, "make_tuple failed in addInfo");
       }
-      
+
       try {
-	insertRecord(tuple.getTupleByteArray());
+        insertRecord(this.tuple.getTupleByteArray()); // Use the member tuple
       }
       catch (Exception e) {
-	throw new IndexCatalogException(e, "insertRecord() failed");
+        throw new IndexCatalogException(e, "insertRecord() failed in addInfo");
       }
     };
   
   // REMOVE INDEX ENTRY FROM CATALOG
   public void removeInfo(String relation, String attrName,
-			 IndexType accessType)
-    throws IOException, 
-	   Catalogmissparam, 
-	   Catalogattrnotfound,
-	   IndexCatalogException
+             IndexType accessType)
+    throws IOException, Catalogmissparam, Catalogindexnotfound, IndexCatalogException
     {
-      int recSize;
-      RID rid = null;
+      if ((relation == null)||(attrName == null) || (accessType == null))
+        throw new Catalogmissparam(null, "MISSING_PARAM relation, attrName, or accessType");
+
+      RID rid = new RID();
       Scan pscan = null;
-      IndexDesc record = null;
-      
-      if ((relation == null)||(attrName == null))
-	throw new Catalogmissparam(null, "MISSING_PARAM");
-      
-      // OPEN SCAN
+      IndexDesc record = new IndexDesc(); // Local record to read into
+      boolean found = false;
+
       try {
-	pscan = new Scan(this);
+          try {
+            pscan = new Scan(this);
+          } catch (Exception e) {
+            throw new IndexCatalogException(e,"scan failed");
+          }
+
+          Tuple currentTuple = null; // Use a local Tuple for reading
+
+          while (true)
+            {
+              try {
+                currentTuple = pscan.getNext(rid);
+                if (currentTuple == null) {
+                  break; // End of scan
+                }
+
+                if (this.attrs == null || this.str_sizes == null) {
+                    throw new IndexCatalogException(null, "Internal error: IndexCatalog schema not initialized.");
+                }
+                // *** Use NUM_FIELDS ***
+                currentTuple.setHdr(NUM_FIELDS, this.attrs, this.str_sizes);
+
+                // Initialize sub-objects if null before reading
+                if (record.accessType == null) record.accessType = new IndexType(IndexType.None);
+                if (record.order == null) record.order = new TupleOrder(TupleOrder.Ascending);
+                read_tuple(currentTuple, record);
+              }
+              catch (Exception e4) {
+                throw new IndexCatalogException(e4, "getNext, setHdr, or read_tuple failed");
+              }
+
+              // Check if this is the record to delete
+              if(record.relName != null && record.attrName != null && record.accessType != null &&
+                 record.relName.equalsIgnoreCase(relation)==true &&
+                 record.attrName.equalsIgnoreCase(attrName)==true &&
+                 (record.accessType.indexType == accessType.indexType))
+                {
+                  try {
+                    deleteRecord(rid);  // FOUND - DELETE
+                    found = true;
+                  } catch (Exception e){
+                    throw new IndexCatalogException(e, "deleteRecord() failed");
+                  }
+                  break; // Exit loop after deleting
+                }
+            } // End while
+
+            if (!found) {
+                throw new Catalogindexnotfound(null, "Catalog: Index not Found for " + relation + "." + attrName + " with type " + accessType.indexType + " for removal.");
+            }
+
+      } finally {
+          if (pscan != null) {
+              pscan.closescan();
+          }
       }
-      catch (Exception e) {
-	throw new IndexCatalogException(e,"scan failed");
-      }
-      
-      // SCAN FILE
-      
-      while (true)
-	{
-	  try {
-	    tuple = pscan.getNext(rid);
-	    if (tuple == null) 
-	      throw new Catalogattrnotfound(null,
-					    "Catalog: Attribute not Found!");
-	    read_tuple(tuple, record);
-	  }
-	  catch (Exception e4) {
-	    throw new IndexCatalogException(e4, "read_tuple failed");
-	  }
-	  
-	  if(record.relName.equalsIgnoreCase(relation)==true 
-	     && record.attrName.equalsIgnoreCase(attrName)==true
-	     && (record.accessType == accessType))
-	    {
-	      try {
-		deleteRecord(rid);  //  FOUND -  DELETE        
-	      }
-	      catch (Exception e){
-		throw new IndexCatalogException(e, "deleteRecord() failed");
-	      }
-	      break; 
-	    }
-	}
-      
-      return;    
     };
 
 
@@ -454,40 +499,39 @@ public class IndexCatalog extends Heapfile
     public void addIndexCatalogEntry(IndexDesc record)
     throws IOException,
        IndexCatalogException,
-           Catalogmissparam // Add other specific exceptions make_tuple/insertRecord might throw
+           Catalogmissparam
     {
       // Check if the provided record is valid
       if (record == null || record.relName == null || record.attrName == null || record.accessType == null || record.order == null) {
           throw new Catalogmissparam(null, "Missing/invalid information in IndexDesc record for addIndexCatalogEntry");
       }
+      // Also check physicalFileName if it's mandatory for certain index types
+      if (record.accessType.indexType == IndexType.LSHFIndex && (record.physicalFileName == null || record.physicalFileName.isEmpty())) {
+          // Allow adding LSH entry even if filename is temporarily missing, but log warning?
+          // Or enforce it:
+          // throw new Catalogmissparam(null, "Missing physicalFileName for LSHFIndex in addIndexCatalogEntry");
+          System.err.println("Warning: Adding LSHFIndex entry without a physicalFileName in addIndexCatalogEntry for " + record.relName + "." + record.attrName);
+      }
 
-      // *** Create a LOCAL Tuple for this operation ***
-      Tuple localTuple = new Tuple(Tuple.max_size);
+
+      // Create a LOCAL Tuple for this operation
+      Tuple localTuple = new Tuple(Tuple.max_size); // Use max_size or calculate required size
       try {
           // Ensure the local tuple has the correct header
-          // (Assuming attrs and str_sizes are member variables initialized in constructor)
           if (this.attrs == null || this.str_sizes == null) {
              throw new IndexCatalogException(null, "Internal error: IndexCatalog schema (attrs/str_sizes) not initialized.");
           }
-          localTuple.setHdr((short) 7, this.attrs, this.str_sizes);
+          // *** Use NUM_FIELDS ***
+          localTuple.setHdr(NUM_FIELDS, this.attrs, this.str_sizes);
       } catch (Exception e_hdr) {
           throw new IndexCatalogException(e_hdr, "Failed to set header on local tuple in addIndexCatalogEntry");
       }
-      // *** END LOCAL Tuple Creation ***
-
-
-      // *** DEBUG Check (can be removed later) ***
-      // if (this.tuple == null) {
-      //     System.err.println("DEBUG: addIndexCatalogEntry - Member 'tuple' is null before calling make_tuple (as expected now).");
-      // }
-      // *** END DEBUG ***
 
       try {
         // Convert the provided IndexDesc record into the LOCAL tuple format
         make_tuple(localTuple, record); // Use localTuple
       }
-      catch (Exception e_make) { // Catch specific exceptions if possible
-        // e_make.printStackTrace(); // Optional logging
+      catch (Exception e_make) {
         throw new IndexCatalogException(e_make, "make_tuple failed in addIndexCatalogEntry");
       }
 
@@ -495,8 +539,7 @@ public class IndexCatalog extends Heapfile
         // Insert the LOCAL tuple into the IndexCatalog heap file
         insertRecord(localTuple.getTupleByteArray()); // Use localTuple
       }
-      catch (Exception e_insert) { // Catch specific exceptions like HFException, etc.
-        // e_insert.printStackTrace(); // Optional logging
+      catch (Exception e_insert) {
         throw new IndexCatalogException(e_insert, "insertRecord() failed in addIndexCatalogEntry");
       }
     };
@@ -731,91 +774,141 @@ public class IndexCatalog extends Heapfile
   
   void make_tuple(Tuple tuple, IndexDesc record)
     throws IOException,
-       IndexCatalogException // Use specific exception
+       IndexCatalogException
     {
+      // Ensure tuple and record are not null
+      if (tuple == null || record == null) {
+          throw new IndexCatalogException(null, "Null parameter passed to make_tuple");
+      }
+      // Ensure sub-objects are initialized
+      if (record.accessType == null || record.order == null) {
+          throw new IndexCatalogException(null, "Null accessType or order in IndexDesc for make_tuple");
+      }
+
       try {
-    tuple.setStrFld(1, record.relName);
-    tuple.setStrFld(2, record.attrName);
+        tuple.setStrFld(1, record.relName);
+        tuple.setStrFld(2, record.attrName);
 
-    // *** FIX: Handle LSHFIndex and throw exception for invalid type ***
-    if (record.accessType.indexType == IndexType.None)
-      tuple.setIntFld(3, 0);
-    else if (record.accessType.indexType == IndexType.B_Index)
-      tuple.setIntFld(3, 1);
-    else if (record.accessType.indexType == IndexType.Hash)
-      tuple.setIntFld(3, 2);
-    else if (record.accessType.indexType == IndexType.LSHFIndex) // *** USE LSHFIndex ***
-      tuple.setIntFld(3, 3); // *** Use code 3 ***
-    else
-      // System.out.println("Invalid accessType in IndexCatalog::make_tupl"); // Old way
-      throw new IndexCatalogException(null, "Invalid accessType in make_tuple: " + record.accessType.indexType); // *** Throw exception ***
+        // Handle accessType
+        if (record.accessType.indexType == IndexType.None)
+          tuple.setIntFld(3, 0);
+        else if (record.accessType.indexType == IndexType.B_Index)
+          tuple.setIntFld(3, 1);
+        else if (record.accessType.indexType == IndexType.Hash)
+          tuple.setIntFld(3, 2);
+        else if (record.accessType.indexType == IndexType.LSHFIndex) // Use LSHFIndex
+          tuple.setIntFld(3, 3); // Use code 3
+        else
+          throw new IndexCatalogException(null, "Invalid accessType in make_tuple: " + record.accessType.indexType);
 
-    // *** FIX: Throw exception for invalid order ***
-    if (record.order.tupleOrder == TupleOrder.Ascending)
-      tuple.setIntFld(4, 0);
-    else if (record.order.tupleOrder == TupleOrder.Descending)
-      tuple.setIntFld(4, 1);
-    else if (record.order.tupleOrder == TupleOrder.Random)
-      tuple.setIntFld(4, 2);
-    else
-      // System.out.println("Invalid order in IndexCatalog::make_tuple"); // Old way
-      throw new IndexCatalogException(null, "Invalid order in make_tuple: " + record.order.tupleOrder); // *** Throw exception ***
+        // Handle order
+        if (record.order.tupleOrder == TupleOrder.Ascending)
+          tuple.setIntFld(4, 0);
+        else if (record.order.tupleOrder == TupleOrder.Descending)
+          tuple.setIntFld(4, 1);
+        else if (record.order.tupleOrder == TupleOrder.Random)
+          tuple.setIntFld(4, 2);
+        else
+          throw new IndexCatalogException(null, "Invalid order in make_tuple: " + record.order.tupleOrder);
 
-    tuple.setIntFld(5, record.clustered);
-    tuple.setIntFld(6, record.distinctKeys);
-    tuple.setIntFld(7, record.indexPages);
+        tuple.setIntFld(5, record.clustered);
+        tuple.setIntFld(6, record.distinctKeys);
+        tuple.setIntFld(7, record.indexPages);
+
+        // *** Write physicalFileName (handle null, ensure it fits MAXFILENAME) ***
+        String filenameToWrite = (record.physicalFileName != null) ? record.physicalFileName : "";
+        if (filenameToWrite.length() > MAXFILENAME) {
+            System.err.println("Warning: physicalFileName '" + filenameToWrite + "' exceeds MAXFILENAME (" + MAXFILENAME + ") and will be truncated in IndexCatalog.make_tuple.");
+            filenameToWrite = filenameToWrite.substring(0, MAXFILENAME);
+        }
+        tuple.setStrFld(8, filenameToWrite); // <-- ADDED
+
       }
       catch (Exception e) { // Catch specific like FieldNumberOutOfBoundException if possible
-        // e.printStackTrace(); // Optional logging
-    throw new IndexCatalogException(e,"make_tuple failed");
+        throw new IndexCatalogException(e,"make_tuple failed setting field");
       }
-      // return; // Not needed for void
     };
   
     void read_tuple(Tuple tuple, IndexDesc record)
     throws IOException,
-       IndexCatalogException // Use specific exception
+       IndexCatalogException
     {
+      // Ensure tuple and record are not null
+      if (tuple == null || record == null) {
+          throw new IndexCatalogException(null, "Null parameter passed to read_tuple");
+      }
+      // Ensure sub-objects are initialized if needed by getXXXFld
+      if (record.accessType == null) record.accessType = new IndexType(IndexType.None);
+      if (record.order == null) record.order = new TupleOrder(TupleOrder.Ascending);
+
       try {
-    record.relName = tuple.getStrFld(1);
-    record.attrName = tuple.getStrFld(2);
+        try { record.relName = tuple.getStrFld(1); }
+        catch (Exception e) { throw new IndexCatalogException(e, "read_tuple failed on field 1 (relName)"); }
 
-    int temp;
-    temp = tuple.getIntFld(3);
-    // *** FIX: Handle LSHFIndex and throw exception for invalid type code ***
-    if (temp == 0)
-      record.accessType = new IndexType(IndexType.None);
-    else if (temp == 1)
-      record.accessType = new IndexType(IndexType.B_Index);
-    else if (temp == 2)
-      record.accessType = new IndexType(IndexType.Hash);
-    else if (temp == 3) // *** Check for code 3 ***
-      record.accessType = new IndexType(IndexType.LSHFIndex); // *** USE LSHFIndex ***
-    else
-      // System.out.println("111Error in IndexCatalog::read_tuple"); // Old way
-      throw new IndexCatalogException(null, "Invalid accessType code in read_tuple: " + temp); // *** Throw exception ***
+        try { record.attrName = tuple.getStrFld(2); }
+        catch (Exception e) { throw new IndexCatalogException(e, "read_tuple failed on field 2 (attrName)"); }
 
-    temp = tuple.getIntFld(4);
-    // *** FIX: Throw exception for invalid order code ***
-    if (temp == 0)
-      record.order = new TupleOrder(TupleOrder.Ascending);
-    else if (temp == 1)
-      record.order = new TupleOrder(TupleOrder.Descending);
-    else if (temp == 2)
-      record.order = new TupleOrder(TupleOrder.Random);
-    else
-      // System.out.println("222Error in IndexCatalog::read_tuple"); // Old way
-      throw new IndexCatalogException(null, "Invalid order code in read_tuple: " + temp); // *** Throw exception ***
+        int tempAccessType;
+        try { tempAccessType = tuple.getIntFld(3); }
+        catch (Exception e) { throw new IndexCatalogException(e, "read_tuple failed on field 3 (accessType code)"); }
 
-    record.clustered = tuple.getIntFld(5);
-    record.distinctKeys = tuple.getIntFld(6);
-    record.indexPages = tuple.getIntFld(7);
+        // Handle accessType code
+        if (tempAccessType == 0)
+          record.accessType.indexType = IndexType.None;
+        else if (tempAccessType == 1)
+          record.accessType.indexType = IndexType.B_Index;
+        else if (tempAccessType == 2)
+          record.accessType.indexType = IndexType.Hash;
+        else if (tempAccessType == 3) // Check for code 3
+          record.accessType.indexType = IndexType.LSHFIndex; // Use LSHFIndex
+        else
+          throw new IndexCatalogException(null, "Invalid accessType code (" + tempAccessType + ") found in field 3");
+
+
+        int tempOrder;
+        try { tempOrder = tuple.getIntFld(4); }
+        catch (Exception e) { throw new IndexCatalogException(e, "read_tuple failed on field 4 (order code)"); }
+
+        // Handle order code
+        if (tempOrder == 0)
+          record.order.tupleOrder = TupleOrder.Ascending;
+        else if (tempOrder == 1)
+          record.order.tupleOrder = TupleOrder.Descending;
+        else if (tempOrder == 2)
+          record.order.tupleOrder = TupleOrder.Random;
+        else
+          throw new IndexCatalogException(null, "Invalid order code (" + tempOrder + ") found in field 4");
+
+
+        try { record.clustered = tuple.getIntFld(5); }
+        catch (Exception e) { throw new IndexCatalogException(e, "read_tuple failed on field 5 (clustered)"); }
+
+        try { record.distinctKeys = tuple.getIntFld(6); }
+        catch (Exception e) { throw new IndexCatalogException(e, "read_tuple failed on field 6 (distinctKeys)"); }
+
+        try { record.indexPages = tuple.getIntFld(7); }
+        catch (Exception e) { throw new IndexCatalogException(e, "read_tuple failed on field 7 (indexPages)"); }
+
+        // *** Read physicalFileName ***
+        try { record.physicalFileName = tuple.getStrFld(8); } // <-- ADDED
+        catch (Exception e) { throw new IndexCatalogException(e, "read_tuple failed on field 8 (physicalFileName)"); }
+
+
       }
-      catch (Exception e) { // Catch specific like FieldNumberOutOfBoundException if possible
-        // e.printStackTrace(); // Optional logging
-    throw new IndexCatalogException(e,"read_tuple failed");
+      catch (IndexCatalogException e_read) { // Catch the specific exception thrown above
+          System.err.println("--- Error reading index catalog tuple ---");
+          try {
+              byte[] data = tuple.getTupleByteArray();
+              System.err.print("Tuple data (hex): ");
+              for(int i=0; i<tuple.getLength(); i++) { System.err.printf("%02X ", data[i]); }
+              System.err.println();
+          } catch (Exception ignored) {}
+          System.err.println("--------------------------------------");
+          throw e_read; // Re-throw the detailed exception
       }
-      // return ; // Not needed for void
+      catch (Exception e_other) { // Catch any other unexpected errors
+        throw new IndexCatalogException(e_other, "Unexpected error in read_tuple");
+      }
     };
   
   

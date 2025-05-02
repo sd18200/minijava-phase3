@@ -1,0 +1,481 @@
+DB> createindex rel1 1 10 5
+Creating index on rel1 column 1...
+DEBUG: Checking if index already exists for rel1.attr0
+DEBUG: Index does not exist. Proceeding with creation.
+DEBUG: Heapfile constructor started for: rel1
+DEBUG: Current time: 1746058262596
+DEBUG: Using provided file name: rel1
+DEBUG: Trying to open the file
+DEBUG: About to call get_file_entry for rel1
+DEBUG: Heapfile.get_file_entry - About to call SystemDefs.JavabaseDB.get_file_entry for: rel1
+DEBUG: DB.get_file_entry - Entered for name: rel1
+DEBUG: DB.get_file_entry - Found entry 'rel1' at slot 3 on page 0
+DEBUG: DB.get_file_entry - Returning found pid: 8
+DEBUG: Heapfile.get_file_entry - SystemDefs.JavabaseDB.get_file_entry returned: 8
+DEBUG: get_file_entry completed in 0 ms
+DEBUG: File exists? Yes
+DEBUG: File already exists, first directory page id: 8
+DEBUG: Heapfile constructor completed successfully for: rel1
+Creating B-Tree index file: rel1-B_Index-attr0
+DEBUG: DB.get_file_entry - Entered for name: rel1-B_Index-attr0
+DEBUG: DB.get_file_entry - Returning null (entry not found)
+DEBUG: DB.get_file_entry - Entered for name: rel1-B_Index-attr0
+DEBUG: DB.get_file_entry - Returning null (entry not found)
+DEBUG: BTreeFile.close() called for file: rel1-B_Index-attr0
+DEBUG: BTreeFile.close() attempting to unpin header page: 104
+DEBUG: BTreeFile.close() successfully unpinned header page: 104
+B-Tree index populated.
+DEBUG: Adding index entry to catalog...
+DEBUG: Catalog Add - Index Type: 1, Attr: attr0, Physical File: rel1-B_Index-attr0
+DEBUG: Index entry added to catalog.
+DEBUG: Updating attribute catalog index count...
+DEBUG: Attribute catalog updated.
+DEBUG: Updating relation catalog index count...
+DEBUG: Relation catalog updated.
+Created B-Tree index on rel1.attr0 with 380 entries.
+Index file created: rel1-B_Index-attr0
+Index creation complete.
+Disk pages read: 0
+Disk pages written: 0
+DB> createindex rel1 2 10 5
+Creating index on rel1 column 2...
+DEBUG: Checking if index already exists for rel1.attr1
+DEBUG: Index does not exist. Proceeding with creation.
+DEBUG: Heapfile constructor started for: rel1
+DEBUG: Current time: 1746058279390
+DEBUG: Using provided file name: rel1
+DEBUG: Trying to open the file
+DEBUG: About to call get_file_entry for rel1
+DEBUG: Heapfile.get_file_entry - About to call SystemDefs.JavabaseDB.get_file_entry for: rel1
+DEBUG: DB.get_file_entry - Entered for name: rel1
+DEBUG: DB.get_file_entry - Found entry 'rel1' at slot 3 on page 0
+DEBUG: DB.get_file_entry - Returning found pid: 8
+DEBUG: Heapfile.get_file_entry - SystemDefs.JavabaseDB.get_file_entry returned: 8
+DEBUG: get_file_entry completed in 0 ms
+DEBUG: File exists? Yes
+DEBUG: File already exists, first directory page id: 8
+DEBUG: Heapfile constructor completed successfully for: rel1
+Creating LSH index with 10 layers and 5 hash functions per layer...
+LSH index structure saved to file: rel12_L10_h5.ser
+DEBUG: Adding index entry to catalog...
+DEBUG: Catalog Add - Index Type: 3, Attr: attr1, Physical File: rel12_L10_h5.ser
+DEBUG: Index entry added to catalog.
+DEBUG: Updating attribute catalog index count...
+DEBUG: Attribute catalog updated.
+DEBUG: Updating relation catalog index count...
+DEBUG: Relation catalog updated.
+Created LSH index on rel1.attr1 with 380 entries.
+Index structure saved to file: rel12_L10_h5.ser
+Index creation complete.
+Disk pages read: 0
+Disk pages written: 0
+DB> createindex rel1 3 10 5
+Creating index on rel1 column 3...
+DEBUG: Checking if index already exists for rel1.attr2
+DEBUG: Index does not exist. Proceeding with creation.
+DEBUG: Heapfile constructor started for: rel1
+DEBUG: Current time: 1746058295697
+DEBUG: Using provided file name: rel1
+DEBUG: Trying to open the file
+DEBUG: About to call get_file_entry for rel1
+DEBUG: Heapfile.get_file_entry - About to call SystemDefs.JavabaseDB.get_file_entry for: rel1
+DEBUG: DB.get_file_entry - Entered for name: rel1
+DEBUG: DB.get_file_entry - Found entry 'rel1' at slot 3 on page 0
+DEBUG: DB.get_file_entry - Returning found pid: 8
+DEBUG: Heapfile.get_file_entry - SystemDefs.JavabaseDB.get_file_entry returned: 8
+DEBUG: get_file_entry completed in 0 ms
+DEBUG: File exists? Yes
+DEBUG: File already exists, first directory page id: 8
+DEBUG: Heapfile constructor completed successfully for: rel1
+Creating B-Tree index file: rel1-B_Index-attr2
+DEBUG: DB.get_file_entry - Entered for name: rel1-B_Index-attr2
+DEBUG: DB.get_file_entry - Returning null (entry not found)
+DEBUG: DB.get_file_entry - Entered for name: rel1-B_Index-attr2
+DEBUG: DB.get_file_entry - Returning null (entry not found)
+DEBUG: BTreeFile.close() called for file: rel1-B_Index-attr2
+DEBUG: BTreeFile.close() attempting to unpin header page: 109
+DEBUG: BTreeFile.close() successfully unpinned header page: 109
+B-Tree index populated.
+DEBUG: Adding index entry to catalog...
+DEBUG: Catalog Add - Index Type: 1, Attr: attr2, Physical File: rel1-B_Index-attr2
+DEBUG: Index entry added to catalog.
+DEBUG: Updating attribute catalog index count...
+DEBUG: Attribute catalog updated.
+DEBUG: Updating relation catalog index count...
+DEBUG: Relation catalog updated.
+Created B-Tree index on rel1.attr2 with 380 entries.
+Index file created: rel1-B_Index-attr2
+Index creation complete.
+Disk pages read: 0
+Disk pages written: 0
+DB> createindex rel1 4 10 5
+Creating index on rel1 column 4...
+DEBUG: Checking if index already exists for rel1.attr3
+DEBUG: Index does not exist. Proceeding with creation.
+DEBUG: Heapfile constructor started for: rel1
+DEBUG: Current time: 1746058309113
+DEBUG: Using provided file name: rel1
+DEBUG: Trying to open the file
+DEBUG: About to call get_file_entry for rel1
+DEBUG: Heapfile.get_file_entry - About to call SystemDefs.JavabaseDB.get_file_entry for: rel1
+DEBUG: DB.get_file_entry - Entered for name: rel1
+DEBUG: DB.get_file_entry - Found entry 'rel1' at slot 3 on page 0
+DEBUG: DB.get_file_entry - Returning found pid: 8
+DEBUG: Heapfile.get_file_entry - SystemDefs.JavabaseDB.get_file_entry returned: 8
+DEBUG: get_file_entry completed in 0 ms
+DEBUG: File exists? Yes
+DEBUG: File already exists, first directory page id: 8
+DEBUG: Heapfile constructor completed successfully for: rel1
+Creating LSH index with 10 layers and 5 hash functions per layer...
+LSH index structure saved to file: rel14_L10_h5.ser
+DEBUG: Adding index entry to catalog...
+DEBUG: Catalog Add - Index Type: 3, Attr: attr3, Physical File: rel14_L10_h5.ser
+DEBUG: Index entry added to catalog.
+DEBUG: Updating attribute catalog index count...
+DEBUG: Attribute catalog updated.
+DEBUG: Updating relation catalog index count...
+DEBUG: Relation catalog updated.
+Created LSH index on rel1.attr3 with 380 entries.
+Index structure saved to file: rel14_L10_h5.ser
+Index creation complete.
+Disk pages read: 0
+Disk pages written: 0
+
+this is the log for running
+createindex rel1 1 10 5
+createindex rel1 2 10 5
+createindex rel1 3 10 5
+createindex rel1 4 10 5
+
+query rel1 dummy phase3_demo_data/sortquery1.txt 100
+
+: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned a tuple.
+DEBUG: FileScan.get_next() - Set header on tuple.
+DEBUG: FileScan.get_next() - No OutputFilter, evalResult defaults to true.
+DEBUG: FileScan.get_next() - Predicate passed. Calling Projection.Project...
+DEBUG: FileScan.get_next() - Projection successful. Returning tuple.
+DEBUG: FileScan.get_next() - Calling heap scan getNext...
+DEBUG: FileScan.get_next() - Heap scan returned null. End of scan.
+DEBUG: Sort.get_next() - Finished reading input. Total tuples read: 380
+DEBUG: Sort.get_next() - Performing internal sort. All 380 tuples fit in memory.
+0.00 | [110.0, Vec{100,100,100,100,100...}, 110.0, Vec{100,100,100,100,100...}]
+11.75 | [109.0, Vec{100,100,101,101,101...}, 109.0, Vec{101,101,102,100,102...}]
+11.79 | [100.0, Vec{100,101,102,102,102...}, 100.0, Vec{102,100,101,100,100...}]
+12.81 | [102.0, Vec{100,102,100,102,101...}, 102.0, Vec{101,101,101,102,100...}]
+12.81 | [103.0, Vec{100,102,100,102,101...}, 103.0, Vec{101,101,101,102,100...}]
+12.81 | [104.0, Vec{100,102,100,102,101...}, 104.0, Vec{101,101,101,102,100...}]
+12.81 | [105.0, Vec{100,102,100,102,101...}, 105.0, Vec{101,101,101,102,100...}]
+12.81 | [108.0, Vec{100,102,100,102,101...}, 108.0, Vec{101,101,101,102,100...}]
+13.00 | [107.0, Vec{101,101,102,101,102...}, 107.0, Vec{102,102,101,102,101...}]
+13.19 | [106.0, Vec{102,102,100,100,102...}, 106.0, Vec{100,101,100,101,102...}]
+13.56 | [101.0, Vec{101,100,102,102,102...}, 101.0, Vec{100,102,102,101,101...}]
+13.86 | [110.0, Vec{101,101,101,102,100...}, 110.0, Vec{100,102,100,102,101...}]
+540.32 | [3.0, Vec{87,81,32,95,18...}, 30.0, Vec{62,41,24,89,18...}]
+543.59 | [24.0, Vec{44,59,90,99,79...}, 39.0, Vec{22,97,25,36,50...}]
+553.73 | [83.0, Vec{9,84,56,72,21...}, 89.0, Vec{42,87,62,73,49...}]
+554.39 | [92.0, Vec{93,47,47,57,41...}, 35.0, Vec{4,10,5,33,96...}]
+554.94 | [19.0, Vec{68,42,100,30,87...}, 83.0, Vec{14,15,31,89,13...}]
+559.76 | [6.0, Vec{99,99,48,55,80...}, 1.0, Vec{65,51,51,42,1...}]
+571.08 | [60.0, Vec{6,29,89,77,61...}, 46.0, Vec{92,25,26,7,96...}]
+571.81 | [9.0, Vec{65,71,82,67,34...}, 33.0, Vec{24,49,79,34,29...}]
+575.46 | [71.0, Vec{3,91,99,98,3...}, 70.0, Vec{57,57,42,34,37...}]
+576.77 | [82.0, Vec{44,58,61,72,95...}, 75.0, Vec{74,9,92,98,80...}]
+577.31 | [89.0, Vec{51,83,64,13,96...}, 22.0, Vec{40,56,13,26,39...}]
+579.89 | [68.0, Vec{55,39,26,73,24...}, 2.0, Vec{27,65,100,43,93...}]
+581.03 | [82.0, Vec{61,25,56,72,75...}, 2.0, Vec{14,96,55,6,76...}]
+582.41 | [29.0, Vec{63,31,14,81,90...}, 83.0, Vec{0,17,46,62,9...}]
+583.31 | [28.0, Vec{100,92,8,58,41...}, 17.0, Vec{20,54,4,95,19...}]
+588.84 | [42.0, Vec{38,19,44,62,49...}, 6.0, Vec{53,26,58,25,65...}]
+596.83 | [91.0, Vec{65,57,99,2,8...}, 26.0, Vec{16,57,66,92,1...}]
+597.23 | [57.0, Vec{65,16,86,58,53...}, 17.0, Vec{23,55,77,41,42...}]
+599.88 | [68.0, Vec{96,74,12,81,69...}, 51.0, Vec{83,29,70,88,23...}]
+601.43 | [35.0, Vec{12,22,2,25,6...}, 1.0, Vec{78,30,97,82,49...}]
+606.30 | [23.0, Vec{98,43,94,25,12...}, 84.0, Vec{78,11,90,48,74...}]
+611.53 | [10.0, Vec{13,60,68,21,66...}, 99.0, Vec{10,83,63,21,91...}]
+611.87 | [84.0, Vec{74,79,3,44,78...}, 73.0, Vec{23,57,31,53,70...}]
+622.88 | [40.0, Vec{32,57,12,71,34...}, 93.0, Vec{70,26,85,72,57...}]
+57849.81 | [9088.0, Vec{8312,5073,3985,7762,2376...}, 3718.0, Vec{3603,4319,248,2092,2609...}]
+57852.71 | [7824.0, Vec{673,2175,7880,1414,4649...}, 2538.0, Vec{8941,2585,6822,237,8991...}]
+57855.05 | [1877.0, Vec{4185,3603,1411,230,3322...}, 5766.0, Vec{4071,8072,4532,787,9529...}]
+57858.23 | [2143.0, Vec{3834,6809,6137,6491,7995...}, 1568.0, Vec{5982,48,6987,4220,5852...}]
+57862.63 | [7522.0, Vec{6432,7736,4143,2450,2836...}, 7267.0, Vec{7777,1451,771,1257,6163...}]
+57898.24 | [4086.0, Vec{1215,6537,6035,7751,2808...}, 8796.0, Vec{3741,3086,6766,1568,6937...}]
+57966.71 | [2108.0, Vec{4812,2467,2308,804,9121...}, 3752.0, Vec{8890,4078,4315,8444,7853...}]
+57979.49 | [9652.0, Vec{577,4171,3317,7098,5630...}, 2487.0, Vec{3117,9616,1786,4328,2831...}]
+58006.01 | [2218.0, Vec{4673,26,6664,74,2877...}, 2622.0, Vec{6632,9621,8450,2600,55...}]
+58045.93 | [3117.0, Vec{7396,4318,899,1286,6392...}, 9593.0, Vec{9992,9863,8222,3667,796...}]
+58067.40 | [9294.0, Vec{8799,1478,5884,1123,3916...}, 6842.0, Vec{747,1807,6624,2299,8844...}]
+58089.82 | [1989.0, Vec{6386,6041,5885,2111,1817...}, 2021.0, Vec{1219,3765,8625,2467,4713...}]
+58090.82 | [9232.0, Vec{6411,7000,703,9182,1635...}, 9520.0, Vec{6010,4044,6324,8148,5703...}]
+58097.83 | [8013.0, Vec{768,3979,4886,2907,5434...}, 652.0, Vec{2979,9817,1637,3019,9500...}]
+58119.56 | [2582.0, Vec{3362,4904,6742,7014,5573...}, 5575.0, Vec{1178,4764,6024,6306,3518...}]
+58123.44 | [1902.0, Vec{8904,9032,4403,447,1636...}, 3856.0, Vec{6463,4293,9367,358,3249...}]
+58146.17 | [4479.0, Vec{6480,6916,5073,383,7916...}, 8707.0, Vec{5166,4817,4641,4361,6273...}]
+58173.55 | [7931.0, Vec{1831,5158,6742,4034,8794...}, 9745.0, Vec{7550,914,2733,4022,8910...}]
+58183.59 | [1173.0, Vec{8761,5165,6995,9183,6521...}, 9346.0, Vec{638,6569,9891,6887,1379...}]
+58190.70 | [7154.0, Vec{9773,6508,6681,6633,7461...}, 1959.0, Vec{7714,2658,3526,7093,1185...}]
+58221.86 | [255.0, Vec{4110,7997,4605,7494,9152...}, 5153.0, Vec{2191,2523,4239,3017,2606...}]
+58244.04 | [3200.0, Vec{3386,6189,372,5302,9496...}, 7914.0, Vec{7355,734,190,665,9822...}]
+58246.96 | [6977.0, Vec{4472,6680,5126,3666,3266...}, 7141.0, Vec{7552,8893,755,671,8869...}]
+58252.46 | [1447.0, Vec{6237,208,9744,5080,332...}, 1846.0, Vec{3061,7797,355,6869,9737...}]
+58365.11 | [9562.0, Vec{2188,5018,730,736,6481...}, 7818.0, Vec{1900,1770,7451,1091,867...}]
+58366.56 | [5130.0, Vec{6676,4167,6338,2259,1822...}, 2231.0, Vec{388,2566,9644,66,2648...}]
+58375.76 | [7420.0, Vec{2415,5968,2651,9252,6398...}, 1295.0, Vec{7473,4161,3460,6946,2337...}]
+58411.48 | [199.0, Vec{1073,5087,6807,1549,8411...}, 5902.0, Vec{3147,451,9257,8045,2669...}]
+58417.28 | [7015.0, Vec{8343,6029,4162,9982,7238...}, 2243.0, Vec{7856,2844,5192,2796,6646...}]
+58439.15 | [4989.0, Vec{4324,7813,4271,2112,4444...}, 1700.0, Vec{9171,2182,6020,4905,6115...}]
+58491.88 | [582.0, Vec{1390,4218,2182,2112,4534...}, 3304.0, Vec{6925,6717,8246,6553,4218...}]
+58535.57 | [9734.0, Vec{5261,7218,5937,6225,1626...}, 9341.0, Vec{8005,2966,6845,191,4026...}]
+58545.21 | [5344.0, Vec{1586,9595,6696,7639,8451...}, 983.0, Vec{3293,9711,1298,3519,9464...}]
+58545.93 | [7268.0, Vec{5240,1577,5714,5844,6144...}, 76.0, Vec{9812,117,4753,4241,794...}]
+58625.87 | [3229.0, Vec{2617,8163,7171,4117,8962...}, 8839.0, Vec{6313,5338,5652,5846,1593...}]
+58634.31 | [1811.0, Vec{7376,2917,6752,6553,946...}, 1195.0, Vec{5071,2160,3392,3456,9180...}]
+58636.09 | [9315.0, Vec{476,5499,1374,4694,5318...}, 554.0, Vec{6341,9503,2065,5852,6125...}]
+58696.07 | [1298.0, Vec{4469,817,4413,4586,8435...}, 4470.0, Vec{4467,346,7235,6371,235...}]
+58730.71 | [7000.0, Vec{1994,419,648,5076,150...}, 3367.0, Vec{9342,7784,6519,6752,9654...}]
+58776.05 | [1570.0, Vec{9916,6762,9726,8429,1587...}, 2360.0, Vec{6189,4627,1801,139,8894...}]
+58797.99 | [6806.0, Vec{7103,5262,5719,3622,1061...}, 9461.0, Vec{3044,5658,6885,4901,2045...}]
+58868.72 | [1375.0, Vec{2791,3224,7812,9627,380...}, 2053.0, Vec{8369,111,8287,4613,8787...}]
+58879.51 | [3323.0, Vec{5668,5821,6605,3950,7940...}, 5915.0, Vec{4049,8727,6172,3786,7929...}]
+58882.28 | [6980.0, Vec{9083,7952,4317,1969,3433...}, 1836.0, Vec{4214,8260,4671,5719,2311...}]
+58938.25 | [6864.0, Vec{9006,7287,4070,3276,3641...}, 8095.0, Vec{3372,9895,9302,4060,7397...}]
+58959.65 | [3479.0, Vec{4454,9364,4586,5720,4429...}, 8608.0, Vec{2174,376,6946,5362,7494...}]
+58975.10 | [9409.0, Vec{2690,9762,9310,5662,4420...}, 7819.0, Vec{9259,7715,9921,1493,1714...}]
+58992.84 | [4512.0, Vec{7420,9334,9814,5337,8328...}, 6796.0, Vec{1317,1418,5513,105,8216...}]
+59007.62 | [9012.0, Vec{3081,2652,428,3567,4169...}, 5221.0, Vec{2021,2744,2769,5129,7740...}]
+59014.56 | [7582.0, Vec{9623,1293,4366,7802,313...}, 1696.0, Vec{4219,8173,7980,6613,9375...}]
+59061.61 | [1712.0, Vec{3902,8062,6649,3249,6151...}, 8284.0, Vec{8858,9914,6312,750,8445...}]
+59104.22 | [5605.0, Vec{9185,2245,4358,7525,2092...}, 6527.0, Vec{4818,6917,3093,9448,4494...}]
+59128.92 | [1753.0, Vec{6840,1966,2576,8845,7042...}, 6980.0, Vec{2988,7074,5424,5615,4189...}]
+59237.38 | [7785.0, Vec{9040,9732,9768,9129,5168...}, 5522.0, Vec{6208,7127,827,3670,1098...}]
+59240.23 | [5131.0, Vec{6789,4483,7448,3548,6204...}, 4552.0, Vec{1708,7487,6462,236,6492...}]
+59256.11 | [4851.0, Vec{3229,3195,5419,9772,8804...}, 5598.0, Vec{3039,3990,5757,3000,4034...}]
+59260.46 | [2045.0, Vec{2813,9272,1518,6948,8217...}, 8018.0, Vec{5143,6442,4060,2858,2638...}]
+59277.45 | [6705.0, Vec{9140,7356,1166,9179,5642...}, 2851.0, Vec{6287,1938,4154,3678,8276...}]
+59279.78 | [3515.0, Vec{5373,274,5333,1886,4521...}, 7266.0, Vec{8992,1190,7543,8837,8612...}]
+59291.53 | [4183.0, Vec{6067,2353,5558,6510,9022...}, 5058.0, Vec{7025,3856,7163,9624,6890...}]
+59298.40 | [1042.0, Vec{9857,3056,8848,8492,7255...}, 2111.0, Vec{6372,7810,7501,6483,6149...}]
+59429.29 | [5350.0, Vec{1492,4775,5612,4695,6832...}, 4446.0, Vec{220,8632,5942,9819,9955...}]
+59435.04 | [6358.0, Vec{3548,5663,2101,8794,4391...}, 6576.0, Vec{7552,8088,4273,9633,4238...}]
+59466.32 | [4345.0, Vec{909,1690,8761,6609,6431...}, 2368.0, Vec{1807,3578,4460,5142,5919...}]
+59522.29 | [8665.0, Vec{3234,5881,667,2244,3895...}, 7381.0, Vec{1302,4633,9309,7082,8970...}]
+59551.40 | [8312.0, Vec{9367,7042,2546,2181,9437...}, 5560.0, Vec{7817,6786,1948,2050,2489...}]
+59567.44 | [201.0, Vec{9479,3809,9779,5787,8989...}, 6160.0, Vec{3932,2909,5947,1272,744...}]
+59586.78 | [2162.0, Vec{8447,8564,8587,7389,6205...}, 7388.0, Vec{6510,5797,3951,1995,6514...}]
+59596.66 | [3092.0, Vec{6546,7999,2431,4312,620...}, 7078.0, Vec{1061,7447,946,6110,1875...}]
+59771.69 | [5328.0, Vec{9701,4748,8372,5946,7594...}, 6215.0, Vec{6154,8370,9082,1234,8910...}]
+59783.79 | [6551.0, Vec{9192,4915,5367,3104,547...}, 8078.0, Vec{9948,6377,2911,2744,6483...}]
+59783.95 | [6092.0, Vec{5857,6938,5344,9175,4458...}, 6638.0, Vec{2296,8612,1171,9269,7687...}]
+59840.68 | [4034.0, Vec{8703,8930,8847,5564,8371...}, 6924.0, Vec{8781,3003,7590,3301,8097...}]
+59891.01 | [8363.0, Vec{2152,2072,4869,4686,2245...}, 2795.0, Vec{1964,8385,8599,2045,6070...}]
+59892.54 | [9541.0, Vec{4490,4050,5022,2887,4790...}, 6852.0, Vec{3555,6949,2225,7163,222...}]
+59935.09 | [5180.0, Vec{3235,6974,4165,6243,1079...}, 701.0, Vec{904,9681,1535,1244,7878...}]
+59946.88 | [2191.0, Vec{4132,2920,8635,9251,4267...}, 8859.0, Vec{9997,279,279,7529,2673...}]
+59991.86 | [9304.0, Vec{3619,1963,1663,1281,4306...}, 6114.0, Vec{2818,1960,1744,5988,3186...}]
+59998.92 | [1442.0, Vec{5357,6592,9322,2635,9164...}, 2440.0, Vec{5186,7413,875,2792,6120...}]
+60007.33 | [9515.0, Vec{4722,4817,6886,7787,4937...}, 6321.0, Vec{5344,3233,2584,7342,7135...}]
+60030.75 | [4204.0, Vec{1368,2958,41,9525,9693...}, 6074.0, Vec{8153,5913,1228,6738,2498...}]
+60103.64 | [3334.0, Vec{8299,8423,7931,2403,1658...}, 9755.0, Vec{6083,154,5647,8200,1539...}]
+60143.56 | [6272.0, Vec{5572,9361,6424,7697,6524...}, 2725.0, Vec{3102,527,8369,748,6903...}]
+60154.81 | [1145.0, Vec{4468,5355,6117,9887,7617...}, 2223.0, Vec{3572,3154,7153,8271,3147...}]
+60158.36 | [5279.0, Vec{9695,3104,9168,9842,2878...}, 7104.0, Vec{102,1221,1076,7822,258...}]
+60162.93 | [2091.0, Vec{351,1568,9588,7294,1719...}, 1506.0, Vec{3488,7700,5862,7516,1185...}]
+60182.42 | [6511.0, Vec{5002,4307,302,5677,4424...}, 1634.0, Vec{8402,7073,64,7289,1944...}]
+60373.77 | [7156.0, Vec{8749,3298,9825,2025,6945...}, 1966.0, Vec{7424,1963,282,8416,8788...}]
+60388.55 | [3321.0, Vec{1650,9993,1469,9005,3861...}, 1644.0, Vec{8044,2232,3119,951,7278...}]
+60429.88 | [242.0, Vec{8025,9448,4356,6048,8559...}, 6242.0, Vec{1141,4946,1007,4103,8252...}]
+60969.57 | [3651.0, Vec{4316,7745,6317,5960,985...}, 1341.0, Vec{4670,7969,2016,6269,7454...}]
+60994.19 | [3739.0, Vec{547,6640,3197,2122,8179...}, 4863.0, Vec{1253,2195,1953,9349,8560...}]
+61024.26 | [2649.0, Vec{9491,6285,6673,8469,5684...}, 6351.0, Vec{6583,9989,360,9818,3441...}]
+61045.55 | [9046.0, Vec{9293,7728,2848,3237,8716...}, 8187.0, Vec{5757,2974,9769,5110,8534...}]
+61051.15 | [666.0, Vec{204,9173,8542,3865,9972...}, 5823.0, Vec{4867,230,5502,7834,5906...}]
+61064.62 | [8836.0, Vec{4368,2067,5930,2950,7624...}, 2234.0, Vec{3180,9055,6022,1887,1760...}]
+61103.75 | [7493.0, Vec{8816,8860,9676,9344,9086...}, 1372.0, Vec{1553,8566,9206,6075,1070...}]
+61225.39 | [4169.0, Vec{8165,1480,7294,8358,4703...}, 3155.0, Vec{2755,2616,4591,1282,2198...}]
+61226.02 | [2754.0, Vec{5132,8292,1081,4722,7352...}, 5312.0, Vec{726,1247,183,3534,2727...}]
+61263.93 | [6994.0, Vec{9159,7672,1862,5897,3845...}, 4529.0, Vec{1258,8094,4232,8861,4370...}]
+61299.54 | [6930.0, Vec{3452,1870,5602,1929,7658...}, 6070.0, Vec{4101,7239,198,5143,7394...}]
+61469.20 | [3224.0, Vec{3403,5836,2264,3839,2907...}, 4848.0, Vec{4585,2478,8278,9459,110...}]
+61494.38 | [5749.0, Vec{6181,9877,241,3965,7405...}, 1190.0, Vec{4031,4710,7698,7381,3306...}]
+61563.32 | [3659.0, Vec{2678,5850,8031,1118,7988...}, 2556.0, Vec{9469,5704,8520,8468,5345...}]
+61839.46 | [7324.0, Vec{5555,3084,8048,5969,1345...}, 3456.0, Vec{2089,7803,9074,2929,9502...}]
+62046.39 | [15.0, Vec{9278,8276,5753,3997,921...}, 553.0, Vec{3030,1862,3805,333,9086...}]
+62071.24 | [487.0, Vec{6524,4101,4294,4695,1890...}, 6644.0, Vec{5052,2996,3801,7934,1981...}]
+62254.54 | [2174.0, Vec{8469,4776,8938,8649,6450...}, 3696.0, Vec{8384,1453,4199,8144,492...}]
+62508.49 | [4887.0, Vec{7738,3924,1193,5061,7980...}, 8581.0, Vec{4890,2441,6800,8416,2027...}]
+62979.58 | [8126.0, Vec{4278,5070,9191,7326,8721...}, 9601.0, Vec{7499,8134,8758,2507,2199...}]
+63085.78 | [2000.0, Vec{9646,4467,9799,1571,8796...}, 7842.0, Vec{7203,1025,3412,6188,7713...}]
+---------------------------------------------
+Total records returned: 380
+Query execution completed.
+Page reads: 0
+Page writes: 0
+
+DB> query rel1 dummy phase3_demo_data/filterquery.txt 100
+Executing query using specification in phase3_demo_data/filterquery.txt...
+Note: Using up to 100 buffer pages (limited by current buffer pool size)
+DEBUG: Adjusting CondExpr for Real->Integer BTree index scan.
+DEBUG: Heapfile constructor started for: rel1
+DEBUG: Current time: 1746058580069
+DEBUG: Using provided file name: rel1
+DEBUG: Trying to open the file
+DEBUG: About to call get_file_entry for rel1
+DEBUG: Heapfile.get_file_entry - About to call SystemDefs.JavabaseDB.get_file_entry for: rel1
+DEBUG: DB.get_file_entry - Entered for name: rel1
+DEBUG: DB.get_file_entry - Found entry 'rel1' at slot 3 on page 0
+DEBUG: DB.get_file_entry - Returning found pid: 8
+DEBUG: Heapfile.get_file_entry - SystemDefs.JavabaseDB.get_file_entry returned: 8
+DEBUG: get_file_entry completed in 0 ms
+DEBUG: File exists? Yes
+DEBUG: File already exists, first directory page id: 8
+DEBUG: Heapfile constructor completed successfully for: rel1
+DEBUG: DB.get_file_entry - Entered for name: rel1-B_Index-attr2
+DEBUG: DB.get_file_entry - Found entry 'rel1-B_Index-attr2' at slot 5 on page 0
+DEBUG: DB.get_file_entry - Returning found pid: 109
+DEBUG: BTreeFile.findRunStart entered. lo_key=110
+Using BTree index for filter query: rel1-B_Index-attr2
+Filter query results (Top 1):
+--------------------
+DEBUG: PredEval.Eval (Case 1) - Literal type detected: 1
+DEBUG: PredEval.Eval (Case 1) - Comparing attribute (type 2) vs literal (type 1)
+DEBUG: PredEval.Eval (H-case direct): Comparing (int)110.0 vs 110
+DEBUG: PredEval.Eval (H-case direct) - Comparison result: 0
+DEBUG: evaluateOperator - comp_res=0, op=0, result=true
+[110.0, Vec{100,100,100,100,100...}, 110.0, Vec{100,100,100,100,100...}]
+--------------------
+Total records returned: 1 (limited to K=1)
+DEBUG: Attempting to close scan in finally block (Type: index.IndexScan)
+DEBUG: BTFileScan.DestroyBTreeFileScan() called.
+DEBUG: BTFileScan.DestroyBTreeFileScan: Unpinning leaf page 110 (dirty=false).
+DEBUG: BTFileScan.DestroyBTreeFileScan: ...unpinned successfully.
+DEBUG: BTFileScan.DestroyBTreeFileScan() finished.
+DEBUG: BTreeFile.close() called for file: rel1-B_Index-attr2
+DEBUG: BTreeFile.close() attempting to unpin header page: 109
+DEBUG: BTreeFile.close() successfully unpinned header page: 109
+DEBUG: Scan closed successfully in finally block.
+Query execution completed.
+
+

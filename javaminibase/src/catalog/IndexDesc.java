@@ -20,5 +20,6 @@ public class IndexDesc
 	public int        clustered = 0;                 //
 	public int        distinctKeys = 0;              // no of distinct key values
 	public int        indexPages = 0;                // no of index pages
+	public String physicalFileName; 
 };
 
