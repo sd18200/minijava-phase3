@@ -184,13 +184,10 @@ public void DestroyBTreeFileScan()
     throws IOException, bufmgr.InvalidFrameNumberException, bufmgr.ReplacerException,
            bufmgr.PageUnpinnedException, bufmgr.HashEntryNotFoundException
 {
-    System.out.println("DEBUG: BTFileScan.DestroyBTreeFileScan() called."); // Keep this
     if (leafPage != null) {
-        System.out.println("DEBUG: BTFileScan.DestroyBTreeFileScan: Unpinning leaf page " + leafPage.getCurPage().pid + " (dirty=false)."); // MODIFIED Log
         try {
             // --- FIX: Unpin read-only page (dirty=false) ---
             SystemDefs.JavabaseBM.unpinPage(leafPage.getCurPage(), false); // Use false for dirty flag
-            System.out.println("DEBUG: BTFileScan.DestroyBTreeFileScan: ...unpinned successfully."); // Keep this
         } catch (Exception e) {
              System.err.println("ERROR: BTFileScan.DestroyBTreeFileScan: Exception during unpin: " + e.getMessage()); // Keep this
              // Rethrow relevant exceptions as per method signature
@@ -205,10 +202,7 @@ public void DestroyBTreeFileScan()
              leafPage = null; // Ensure leafPage is nulled even if unpin fails
         }
     } else {
-         System.out.println("DEBUG: BTFileScan.DestroyBTreeFileScan: leafPage was already null."); // Keep this
     }
-     // leafPage=null; // Removed from here, moved to finally block above
-     System.out.println("DEBUG: BTFileScan.DestroyBTreeFileScan() finished."); // Keep this
 }
 
 

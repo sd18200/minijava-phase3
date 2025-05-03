@@ -23,7 +23,6 @@ public class Catalog
   public Catalog()
     {
 
-      System.out.println("DEBUG: Entering Catalog constructor...");
       boolean isNewDB = false; // Flag to check if we need to initialize
 
       try {
@@ -40,14 +39,11 @@ public class Catalog
              }
         } catch (Exception ignored) {
              // Ignore exceptions during this check; null means not found or error.
-             System.err.println("DEBUG: Exception during get_file_entry check (likely okay if DB is new): " + ignored);
         }
         isNewDB = (relcatPageId == null);
 
         if (isNewDB) {
-             System.out.println("DEBUG: Catalog constructor detected new database setup.");
         } else {
-             System.out.println("DEBUG: Catalog constructor detected existing database setup.");
         }
 
         // RELCAT (Constructor will create the heap file if isNewDB is true)
@@ -64,19 +60,15 @@ public class Catalog
      } else if (indCat.tuple == null) { // Access tuple directly if possible, or add a getter
           System.err.println("CRITICAL ERROR: Catalog constructor - indCat.tuple is NULL immediately after new IndexCatalog()!");
      } else {
-          System.out.println("DEBUG: Catalog constructor - indCat and indCat.tuple appear OK after construction.");
      }
 
         // *** If it's a new DB, populate the catalog schema ***
         if (isNewDB) {
-            System.out.println("DEBUG: Calling Catalog.initialize() to bootstrap schema...");
             initialize(); // Call the method to populate catalog tables with their own schema
-            System.out.println("DEBUG: Catalog.initialize() completed.");
             // Optional: Flush pages immediately to ensure catalog data is persistent
             try {
                 if (SystemDefs.JavabaseBM != null) {
                     SystemDefs.JavabaseBM.flushAllPages();
-                    System.out.println("DEBUG: Flushed buffer pool pages after catalog initialization.");
                 }
             } catch (Exception flushEx) {
                  System.err.println("Error flushing pages after catalog init: " + flushEx);
@@ -420,7 +412,6 @@ public class Catalog
 
     // --- 2. Insert Relation Definitions into relcatalog ---
     // ... (relCat.addInfo calls remain the same) ...
-    System.out.println("DEBUG: Bootstrapping relcatalog entries using addInfo...");
 
     // Create RelDesc for relcatalog
     RelDesc relDescRel = new RelDesc();
@@ -430,7 +421,6 @@ public class Catalog
     relDescRel.numTuples = 0; // Start with 0, will be updated later
     relDescRel.numPages = 1; // Starts with at least one page (directory)
     relCat.addInfo(relDescRel); // Use addInfo directly
-    System.out.println("DEBUG: Added relcatalog definition to relCat.");
 
     // Create RelDesc for attrcatalog
     RelDesc relDescAttr = new RelDesc();
@@ -440,7 +430,6 @@ public class Catalog
     relDescAttr.numTuples = 0;
     relDescAttr.numPages = 1;
     relCat.addInfo(relDescAttr); // Use addInfo directly
-    System.out.println("DEBUG: Added attrcatalog definition to relCat.");
 
     // Create RelDesc for indexcatalog
     RelDesc relDescIndex = new RelDesc();
@@ -450,11 +439,7 @@ public class Catalog
     relDescIndex.numTuples = 0;
     relDescIndex.numPages = 1;
     relCat.addInfo(relDescIndex); // Use addInfo directly
-    System.out.println("DEBUG: Added indexcatalog definition to relCat.");
 
-
-    // --- 3. Insert Attribute Definitions into attrcatalog ---
-    System.out.println("DEBUG: Bootstrapping attrcatalog entries using addInfo...");
 
     // Add attributes for relcatalog
     currentOffset = 0;
@@ -485,7 +470,6 @@ public class Catalog
         attrCat.addInfo(attrRec); // Use addInfo directly
         currentOffset += relAttrs[i].attrLen;
     }
-    System.out.println("DEBUG: Added attribute definitions for relcatalog to attrCat.");
 
     // Add attributes for attrcatalog
     currentOffset = 0;
@@ -516,7 +500,6 @@ public class Catalog
         attrCat.addInfo(attrRec); // Use addInfo directly
         currentOffset += attrAttrs[i].attrLen;
     }
-    System.out.println("DEBUG: Added attribute definitions for attrcatalog to attrCat.");
 
     // Add attributes for indexcatalog
     currentOffset = 0;
@@ -547,9 +530,6 @@ public class Catalog
         attrCat.addInfo(attrRec); // Use addInfo directly
         currentOffset += indAttrs[i].attrLen;
     }
-    System.out.println("DEBUG: Added attribute definitions for indexcatalog to attrCat.");
-
-    System.out.println("DEBUG: Catalog bootstrapping complete using addInfo.");
   }// End of initialize()
 
   // --- Getters for sub-catalogs ---

@@ -310,7 +310,6 @@ public class RelCatalog extends Heapfile
         rel = new Heapfile(relation); // Create the actual data heapfile
         if (rel == null) // Check if constructor returned null (unlikely but possible)
           throw new Catalognomem(null, "Heapfile creation returned null for " + relation);
-        System.out.println("DEBUG: User data Heapfile created successfully for: " + relation); // Added debug
       }
       catch (Exception e_heap) {
         System.err.println ("Heapfile creation failed for " + relation + ": "+e_heap);

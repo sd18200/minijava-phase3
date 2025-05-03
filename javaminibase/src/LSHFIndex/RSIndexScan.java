@@ -69,36 +69,24 @@ public class RSIndexScan extends Iterator {
             // Load the LSHFIndex from disk
             String indexFilePath = indName.endsWith(".ser") ? indName : indName + ".ser";
             index = LSHFIndex.loadIndex(indexFilePath);
-            System.out.println("DEBUG: Loaded LSH index from: " + indexFilePath);
-
-
             // Open the heap file for the relation
             heapfile = new Heapfile(relName);
-            System.out.println("DEBUG: Opened heapfile: " + relName);
-
-
             // Perform the range search - This might return duplicate RIDs
-            System.out.println("DEBUG: Performing LSH range search...");
             List<RID> rids = index.rangeSearch(queryKey, distance);
-            System.out.println("DEBUG: LSH range search returned " + rids.size() + " candidate RIDs (may include duplicates).");
-
 
             // Fetch tuples corresponding to the UNIQUE RIDs
             List<Tuple> tuples = new ArrayList<>();
             Set<RID> processedRIDs = new HashSet<>(); // Keep track of processed RIDs to ensure uniqueness
 
-            System.out.println("DEBUG: Fetching unique tuples from heapfile...");
             for (RID rid : rids) {
                 // Only process if the RID hasn't been processed yet
                 if (processedRIDs.add(rid)) {
                     try {
-                        //System.out.println("DEBUG: Fetching record for unique RID: " + rid);
                         Tuple tuple = heapfile.getRecord(rid);
                         if (tuple != null) {
-                            // IMPORTANT: Set the header on the tuple after fetching
+                            //  Set the header on the tuple after fetching
                             tuple.setHdr((short) types.length, types, str_sizes);
                             tuples.add(tuple);
-                            //System.out.println("DEBUG: Added tuple for RID: " + rid);
                         } else {
                              System.err.println("Warning: getRecord returned null for RID: " + rid);
                         }
@@ -111,11 +99,8 @@ public class RSIndexScan extends Iterator {
                         throw new IOException("Error fetching record from heapfile for RID: " + rid, e);
                     }
                 } else {
-                     //System.out.println("DEBUG: Skipping duplicate RID: " + rid);
                 }
             }
-             System.out.println("DEBUG: Fetched " + tuples.size() + " unique tuples.");
-
 
             // Initialize an iterator over the fetched unique tuples
             tupleIterator = new TupleIterator(tuples);
@@ -124,16 +109,13 @@ public class RSIndexScan extends Iterator {
             // Clean up resources if initialization fails partially
             if (heapfile != null) {
                 try {
-                    // Assuming Heapfile has a method to release resources without deleting
-                    // If not, this might be tricky. For now, we rely on GC or higher-level cleanup.
                 } catch (Exception cleanupEx) {
                     System.err.println("Error during cleanup after RSIndexScan init failure: " + cleanupEx.getMessage());
                 }
             }
             // Log the root cause
              System.err.println("Error initializing RSIndexScan: " + e.getMessage());
-             e.printStackTrace(); // Print stack trace for detailed debugging
-            // Wrap and rethrow
+             e.printStackTrace(); 
             throw new IOException("Error initializing RSIndexScan", e);
         }
     }

@@ -452,7 +452,6 @@ public class BufMgr implements GlobalConst{
     }
   
   
-  // Debug use only   
   private void bmhashdisplay()
     {
       hashTable.display();

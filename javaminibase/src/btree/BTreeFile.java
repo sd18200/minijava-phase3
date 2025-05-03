@@ -243,15 +243,9 @@ public class BTreeFile extends IndexFile
        HashEntryNotFoundException,
            ReplacerException
     {
-      System.out.println("DEBUG: BTreeFile.close() called for file: " + dbname); // Use dbname if filename not available
-      // Check headerPageId first, as headerPage might be nullified prematurely
       if ( headerPageId!=null && headerPageId.pid != INVALID_PAGE) {
           try {
-              System.out.println("DEBUG: BTreeFile.close() attempting to unpin header page: " + headerPageId.pid);
-              // --- FIX: Use dirty = false ---
               SystemDefs.JavabaseBM.unpinPage(headerPageId, false);
-              System.out.println("DEBUG: BTreeFile.close() successfully unpinned header page: " + headerPageId.pid);
-              // Mark as invalid after successful unpin
               headerPageId.pid = INVALID_PAGE;
           } catch (Exception e) {
                System.err.println("ERROR: BTreeFile.close() failed to unpin header page " + headerPageId.pid + ": " + e.getMessage());
@@ -263,7 +257,6 @@ public class BTreeFile extends IndexFile
                // Optionally wrap other exceptions
           }
       } else {
-           System.out.println("DEBUG: BTreeFile.close(): headerPageId is null or invalid, no unpin needed.");
       }
       // Nullify the headerPage object reference regardless
       headerPage=null;
@@ -1046,7 +1039,6 @@ public class BTreeFile extends IndexFile
        PinPageException,
        UnpinPageException
     {
-      System.out.println("DEBUG: BTreeFile.findRunStart entered. lo_key=" + (lo_key == null ? "null" : lo_key.toString())); // ADDED
       BTLeafPage  pageLeaf;
       BTIndexPage pageIndex;
       Page page;
@@ -1195,93 +1187,112 @@ public class BTreeFile extends IndexFile
    * BTLeafPage::delUserRid.
    */
   
-  private boolean NaiveDelete ( KeyClass key, RID rid)
-    throws LeafDeleteException,  
-	   KeyNotMatchException,  
-	   PinPageException,
-	   ConstructPageException, 
-	   IOException,
-	   UnpinPageException,  
-	   PinPageException, 
-	   IndexSearchException,  
-	   IteratorException
-    {
-      BTLeafPage leafPage;
-      RID curRid=new RID();  // iterator
-      KeyClass curkey;
-      RID dummyRid; 
-      PageId nextpage;
-      boolean deleted;
-      KeyDataEntry entry;
-      
-      if ( trace!=null )
-	{
-          trace.writeBytes("DELETE " +rid.pageNo +" " + rid.slotNo + " " 
-			   + key +lineSep);
-          trace.writeBytes( "DO"+lineSep);
-          trace.writeBytes( "SEARCH" +lineSep);
-          trace.flush();
-	}
-      
-      
-      leafPage=findRunStart(key, curRid);  // find first page,rid of key
-      if( leafPage == null) return false;
-      
-      entry=leafPage.getCurrent(curRid);
-      
-      while ( true ) {
-	
-        while ( entry == null) { // have to go right
-	  nextpage = leafPage.getNextPage();
-	  unpinPage(leafPage.getCurPage());
-	  if (nextpage.pid == INVALID_PAGE) {
-	    return false;
-	  }
-	  
-	  leafPage=new BTLeafPage(pinPage(nextpage), 
-				  headerPage.get_keyType() );
-	  entry=leafPage.getFirst(new RID());
-	}
-	
-	if ( BT.keyCompare(key, entry.key) > 0 )
-	  break;
-	
-	if( leafPage.delEntry(new KeyDataEntry(key, rid)) ==true) {
-	  
-          // successfully found <key, rid> on this page and deleted it.
-          // unpin dirty page and return OK.
-          unpinPage(leafPage.getCurPage(), true /* = DIRTY */);
-	  
-	  
-          if ( trace!=null )
-	    {
-	      trace.writeBytes( "TAKEFROM node " + leafPage.getCurPage()+lineSep);
-	      trace.writeBytes("DONE"+lineSep);
-	      trace.flush();
-	    }
-          
-	  
-          return true;
-	}
-	
-	nextpage = leafPage.getNextPage();
-	unpinPage(leafPage.getCurPage());
-	
-	leafPage=new BTLeafPage(pinPage(nextpage), headerPage.get_keyType());
-	
-	entry=leafPage.getFirst(curRid);
-      }
-      
-      /*
-       * We reached a page with first key > `key', so return an error.
-       * We should have got true back from delUserRid above.  Apparently
-       * the specified <key,rid> data entry does not exist.
-       */
-      
-      unpinPage(leafPage.getCurPage());
-      return false;
-    }
-
+   private boolean NaiveDelete(KeyClass key, RID rid)
+   throws LeafDeleteException,  
+      KeyNotMatchException,  
+      PinPageException,
+      ConstructPageException, 
+      IOException,
+      UnpinPageException,  
+      PinPageException, 
+      IndexSearchException,  
+      IteratorException
+{
+   BTLeafPage leafPage = null;
+   RID curRid = new RID();  // iterator
+   KeyDataEntry entry;
+   PageId nextpage;
+   boolean deleted = false;
+   boolean leafPagePinned = false;  // Track if the current leaf page is pinned
+   
+   if (trace != null) {
+       trace.writeBytes("DELETE " + rid.pageNo + " " + rid.slotNo + " " 
+                     + key + lineSep);
+       trace.writeBytes("DO" + lineSep);
+       trace.writeBytes("SEARCH" + lineSep);
+       trace.flush();
+   }
+   
+   try {
+       leafPage = findRunStart(key, curRid);  // find first page,rid of key
+       if (leafPage == null) return false;  // Empty tree or key < min key in tree
+       
+       leafPagePinned = true;  // Page was pinned by findRunStart
+       entry = leafPage.getCurrent(curRid);
+       
+       while (true) {
+           while (entry == null) { // have to go right
+               nextpage = leafPage.getNextPage();
+               PageId currentPageId = leafPage.getCurPage(); // Save before unpinning
+               
+               // Unpin current page before moving to next
+               unpinPage(currentPageId);
+               leafPagePinned = false;  // Mark as unpinned
+               
+               if (nextpage.pid == INVALID_PAGE) {
+                   // We've reached the end of the leaf pages without finding the key/rid
+                   return false;  // Record not found
+               }
+               
+               // Pin next page
+               leafPage = new BTLeafPage(pinPage(nextpage), headerPage.get_keyType());
+               leafPagePinned = true;  // Mark as pinned
+               entry = leafPage.getFirst(new RID());
+           }
+           
+           // If key > entry.key, we've gone past where our key should be
+           if (BT.keyCompare(key, entry.key) > 0) {
+               // Key not found - current page will be unpinned in finally block
+               return false;
+           }
+           
+           // Try to delete the entry
+           if (leafPage.delEntry(new KeyDataEntry(key, rid)) == true) {
+               // successfully found <key, rid> on this page and deleted it
+               deleted = true;
+               
+               if (trace != null) {
+                   trace.writeBytes("TAKEFROM node " + leafPage.getCurPage() + lineSep);
+                   trace.writeBytes("DONE" + lineSep);
+                   trace.flush();
+               }
+               
+               // Return true - current page will be unpinned in finally block
+               return true;
+           }
+           
+           // Current page doesn't have the record, move to next page
+           nextpage = leafPage.getNextPage();
+           PageId currentPageId = leafPage.getCurPage(); // Save before unpinning
+           
+           // Unpin current page before moving to next
+           unpinPage(currentPageId);
+           leafPagePinned = false;  // Mark as unpinned
+           
+           if (nextpage.pid == INVALID_PAGE) {
+               // We've reached the end of leaf pages
+               return false;
+           }
+           
+           // Pin next page
+           leafPage = new BTLeafPage(pinPage(nextpage), headerPage.get_keyType());
+           leafPagePinned = true;  // Mark as pinned
+           entry = leafPage.getFirst(curRid);
+       }
+   } 
+   finally {
+       // Make sure the current leaf page is unpinned if it's still pinned
+       if (leafPage != null && leafPagePinned) {
+           try {
+               PageId currentPageId = leafPage.getCurPage();
+               unpinPage(currentPageId, deleted /* DIRTY if we deleted something */);
+           } catch (Exception e) {
+               System.err.println("Warning: Error unpinning leaf page in finally block: " + e);
+               // Don't rethrow from finally block
+           }
+       }
+   }
+}
   
   /*
    * Status BTreeFile::FullDelete (const void *key, const RID rid) 

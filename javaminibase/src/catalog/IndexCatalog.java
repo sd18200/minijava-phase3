@@ -28,8 +28,7 @@ public class IndexCatalog extends Heapfile
             // Call the Heapfile constructor
             super(filename); // This MUST be the first line
 
-            // *** ADD DEBUG LOGGING ***
-            System.out.println("DEBUG: IndexCatalog constructor - AFTER super(filename) call for: " + filename);
+
 
             try {
                 // Initialize the tuple member variable
@@ -38,7 +37,6 @@ public class IndexCatalog extends Heapfile
                     System.err.println("CRITICAL ERROR: IndexCatalog constructor - tuple is NULL immediately after new Tuple()!");
                     throw new RuntimeException("Failed to allocate Tuple in IndexCatalog constructor"); // Fail fast
                 } else {
-                    System.out.println("DEBUG: IndexCatalog constructor - AFTER tuple = new Tuple(). Tuple is NOT null.");
                 }
 
                 // Initialize schema arrays
@@ -61,7 +59,6 @@ public class IndexCatalog extends Heapfile
 
                 // Set the header for the tuple
                 tuple.setHdr(NUM_FIELDS, attrs, str_sizes); // Use NUM_FIELDS
-                System.out.println("DEBUG: IndexCatalog constructor - AFTER tuple.setHdr().");
 
                 size = tuple.size(); // Set the size based on the header
 
@@ -72,8 +69,6 @@ public class IndexCatalog extends Heapfile
                 throw new RuntimeException("Failed to initialize IndexCatalog tuple/header", e);
             }
 
-            System.out.println("DEBUG: IndexCatalog constructor - COMPLETED for: " + filename);
-            // *** END DEBUG LOGGING ***
           }
   
   // GET ALL INDEXES FOR A RELATION

@@ -79,25 +79,16 @@ public class DB implements GlobalConst {
            DiskMgrException {
 
     name = new String(fname);
-    // Ensure at least 2 pages (header + space map)
     num_pages = (num_pgs > 2) ? num_pgs : 2;
 
     File DBfile = new File(name);
-    // Log the absolute path it will try to use
-    System.out.println("DEBUG: DB.openDB(create) - Target file path: " + DBfile.getAbsolutePath());
 
-    // Delete the file if it already exists to ensure a fresh start
-    // Note: This doesn't throw an error if the file doesn't exist.
-    //DBfile.delete();
 
     // Create a random access file. "rw" mode creates the file if it doesn't exist.
     try {
-        System.out.println("DEBUG: DB.openDB(create) - Attempting to create RandomAccessFile...");
         fp = new RandomAccessFile(fname, "rw");
-        System.out.println("DEBUG: DB.openDB(create) - RandomAccessFile created successfully.");
     } catch (IOException e) {
         // Log failure details if RandomAccessFile creation fails (e.g., permissions)
-        System.err.println("DEBUG: DB.openDB(create) - FAILED to create RandomAccessFile for: " + DBfile.getAbsolutePath());
         throw e; // Re-throw the original exception
     }
 
@@ -163,27 +154,28 @@ public class DB implements GlobalConst {
    * @exception FileIOException file I/O error
    * @exception IOException I/O errors
    */
-  public  void read_page(PageId pageno, Page apage)
-    throws InvalidPageNumberException, 
-	   FileIOException, 
-	   IOException {
+  public void read_page(PageId pageno, Page apage)
+  throws InvalidPageNumberException, 
+     FileIOException, 
+     IOException {
 
-    if((pageno.pid < 0)||(pageno.pid >= num_pages))
-      throw new InvalidPageNumberException(null, "BAD_PAGE_NUMBER");
-    
-    // Seek to the correct page
-    fp.seek((long)(pageno.pid *MINIBASE_PAGESIZE));
-    
-    // Read the appropriate number of bytes.
-    byte [] buffer = apage.getpage();  //new byte[MINIBASE_PAGESIZE];
-    try{
-      fp.read(buffer);
-    }
-    catch (IOException e) {
-      throw new FileIOException(e, "DB file I/O error");
-    }
-    
+  if((pageno.pid < 0)||(pageno.pid >= num_pages))
+    throw new InvalidPageNumberException(null, "BAD_PAGE_NUMBER");
+  
+  // Seek to the correct page
+  fp.seek((long)(pageno.pid *MINIBASE_PAGESIZE));
+  
+  // Read the appropriate number of bytes.
+  byte [] buffer = apage.getpage();
+  try{
+    fp.read(buffer);
+    // Add counter increment here
+    diskmgr.PCounter.incrementReadCount();
   }
+  catch (IOException e) {
+    throw new FileIOException(e, "DB file I/O error");
+  }
+}
   
   /** Write the contents in a page object to the specified page.
    *
@@ -195,25 +187,26 @@ public class DB implements GlobalConst {
    * @exception IOException I/O errors
    */
   public void write_page(PageId pageno, Page apage)
-    throws InvalidPageNumberException, 
-	   FileIOException, 
-	   IOException {
+  throws InvalidPageNumberException, 
+     FileIOException, 
+     IOException {
 
-    if((pageno.pid < 0)||(pageno.pid >= num_pages))
-      throw new InvalidPageNumberException(null, "INVALID_PAGE_NUMBER");
-    
-    // Seek to the correct page
-    fp.seek((long)(pageno.pid *MINIBASE_PAGESIZE));
-    
-    // Write the appropriate number of bytes.
-    try{
-      fp.write(apage.getpage());
-    }
-    catch (IOException e) {
-      throw new FileIOException(e, "DB file I/O error");
-    }
-    
+  if((pageno.pid < 0)||(pageno.pid >= num_pages))
+    throw new InvalidPageNumberException(null, "INVALID_PAGE_NUMBER");
+  
+  // Seek to the correct page
+  fp.seek((long)(pageno.pid *MINIBASE_PAGESIZE));
+  
+  // Write the appropriate number of bytes.
+  try{
+    fp.write(apage.getpage());
+    // Add counter increment here
+    diskmgr.PCounter.incrementWriteCount();
   }
+  catch (IOException e) {
+    throw new FileIOException(e, "DB file I/O error");
+  }
+}
   
   /** Allocate a set of pages where the run size is taken to be 1 by default.
    *  Gives back the page number of the first page of the allocated run.
@@ -525,7 +518,6 @@ public class DB implements GlobalConst {
         catch(Exception e){
             // If allocation fails, unpin the last directory page we were holding
             unpinPage(hpid, false /* undirty*/);
-            System.err.println("DEBUG: DB.add_file_entry - Failed to allocate new directory page:");
             e.printStackTrace();
             throw new DiskMgrException(e, "DB.java: Failed to allocate new directory page");
         }
@@ -660,7 +652,6 @@ public class DB implements GlobalConst {
        InvalidPageNumberException,
        DiskMgrException {
 
-    System.out.println("DEBUG: DB.get_file_entry - Entered for name: " + name); // Keep: Method entry
     Page apage = new Page();
     boolean found = false;
     PageId hpid = new PageId();
@@ -672,11 +663,8 @@ public class DB implements GlobalConst {
         do
         {
             hpid.pid = nexthpid.pid;
-            // System.out.println("DEBUG: DB.get_file_entry - Loop start, hpid: " + hpid.pid); // Commented out
 
-            // System.out.println("DEBUG: DB.get_file_entry - About to pin page: " + hpid.pid); // Commented out
             pinPage(hpid, apage, false /*read disk*/); // Read from disk if not in buffer
-            // System.out.println("DEBUG: DB.get_file_entry - Pinned page: " + hpid.pid); // Commented out
 
             if(hpid.pid==0)
             {
@@ -688,100 +676,65 @@ public class DB implements GlobalConst {
                 dp = new DBDirectoryPage();
                 ((DBDirectoryPage) dp).openPage(apage);
             }
-            // System.out.println("DEBUG: DB.get_file_entry - About to get next page ID from page: " + hpid.pid); // Commented out
             nexthpid = dp.getNextPage();
-            // System.out.println("DEBUG: DB.get_file_entry - Got next page ID: " + nexthpid.pid); // Commented out
 
             int entry = 0;
             PageId tmppid = new PageId();
-            String tmpname = null; // Initialize tmpname
+            String tmpname = null; 
             int numEntries = dp.getNumOfEntries();
-            // System.out.println("DEBUG: DB.get_file_entry - Num entries on page " + hpid.pid + ": " + numEntries); // Commented out
 
             while(entry < numEntries)
             {
-                // System.out.println("DEBUG: DB.get_file_entry - Checking entry: " + entry + " on page " + hpid.pid); // Commented out
 
-                // 1. Read ONLY the PageID first to check if the slot is used.
                 int position = DBHeaderPage.START_FILE_ENTRIES + entry * DBHeaderPage.SIZE_OF_FILE_ENTRY;
                 try {
                     tmppid.pid = Convert.getIntValue(position, dp.data);
                 } catch (IOException e) {
-                    // Handle potential IOException from Convert.getIntValue
-                    System.err.println("DEBUG: DB.get_file_entry - *** IOException reading PageID for entry " + entry + " on page " + hpid.pid + ": " + e); // Keep Error
                     unpinPage(hpid, false); // Unpin before throwing
                     throw new DiskMgrException(e, "DB.java: Error reading PageID in get_file_entry search");
                 }
 
-                // 2. If the PageID is NOT INVALID_PAGE, then the slot is used.
-                //    Proceed to read the full entry (including the string) and compare.
+
                 if (tmppid.pid != INVALID_PAGE) {
-                    // System.out.println("DEBUG: DB.get_file_entry - Slot " + entry + " is used (pid=" + tmppid.pid + "). Reading full entry."); // Keep: Shows logic path
                     try {
-                        // --- Optional: Debug Bytes (Commented out) ---
-                        // int strOffset = position + 4;
-                        // int strMaxLength = DBHeaderPage.MAX_NAME + 2;
-                        // System.out.print("DEBUG: Bytes at offset " + strOffset + " for entry " + entry + ": ");
-                        // for (int i = 0; i < Math.min(10, strMaxLength); i++) {
-                        //     if (strOffset + i < dp.data.length) { System.out.printf("%02X ", dp.data[strOffset + i]); }
-                        //     else { System.out.print("OOB "); }
-                        // }
-                        // System.out.println();
-                        // --- End Debug Bytes ---
 
-                        // Now read the full entry (PID is re-read here, but that's okay)
-                        tmpname = dp.getFileEntry(tmppid, entry); // Reads PID and String
-                        // System.out.println("DEBUG: DB.get_file_entry - Read entry " + entry + ": pid=" + tmppid.pid + ", name=" + (tmpname != null ? "'" + tmpname + "'" : "null")); // Commented out
-
-                        // Compare the name if successfully read
+                        tmpname = dp.getFileEntry(tmppid, entry); 
+   
                         if((tmpname != null) && (tmpname.compareTo(name) == 0)) {
-                             System.out.println("DEBUG: DB.get_file_entry - Found entry '" + name + "' at slot " + entry + " on page " + hpid.pid); // Keep: Important event
                              startpid = new PageId(tmppid.pid); // Assign the found pid
                              found = true;
                         }
 
                     } catch (UTFDataFormatException utfEx) {
-                        System.err.println("DEBUG: DB.get_file_entry - *** UTFDataFormatException for USED entry " + entry + " on page " + hpid.pid + " ***"); // Keep Error
                         throw utfEx; // Re-throw the original exception
                     } catch (IOException ioEx) {
-                         System.err.println("DEBUG: DB.get_file_entry - *** IOException during getFileEntry call for USED entry " + entry + " on page " + hpid.pid + ": " + ioEx); // Keep Error
                          throw ioEx; // Re-throw the original exception
                     }
                 } else {
-                    // If tmppid.pid == INVALID_PAGE, the slot is unused. Skip reading the string.
-                    // System.out.println("DEBUG: DB.get_file_entry - Slot " + entry + " is unused (pid=INVALID_PAGE). Skipping."); // Keep: Shows fix is working
+                    
                 }
 
-                // Exit loop if found
                 if (found) {
                     break;
                 }
-                // Move to the next entry
                 entry++;
 
-            } // End inner while
+            } 
 
-            // System.out.println("DEBUG: DB.get_file_entry - About to unpin page: " + hpid.pid); // Commented out
             unpinPage(hpid, false /*undirty*/);
-            // System.out.println("DEBUG: DB.get_file_entry - Unpinned page: " + hpid.pid); // Commented out
 
             if (found) {
-                // System.out.println("DEBUG: DB.get_file_entry - Breaking outer loop as entry found."); // Commented out
                 break; // Exit outer loop
             }
-             // System.out.println("DEBUG: DB.get_file_entry - Loop end, continuing to next page: " + nexthpid.pid); // Commented out
 
         } while(nexthpid.pid != INVALID_PAGE);
 
         if (found) {
-             System.out.println("DEBUG: DB.get_file_entry - Returning found pid: " + startpid.pid); // Keep: Method exit
         } else {
-             System.out.println("DEBUG: DB.get_file_entry - Returning null (entry not found)"); // Keep: Method exit
         }
         return startpid;
 
-    } catch (Exception e) { // Catch unexpected exceptions outside the inner try-catch
-        System.err.println("DEBUG: DB.get_file_entry - *** UNEXPECTED EXCEPTION *** (outer catch) for page " + hpid.pid + ": " + e); // Keep Error
+    } catch (Exception e) { 
         e.printStackTrace();
         if (e instanceof IOException) throw (IOException)e;
         if (e instanceof FileIOException) throw (FileIOException)e;

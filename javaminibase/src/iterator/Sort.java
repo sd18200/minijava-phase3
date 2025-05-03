@@ -164,26 +164,12 @@ public class Sort extends Iterator implements GlobalConst
     tuples_returned = 0; // Initialize top-k counter
     Nruns = 0; // Initialize actual number of runs
 
-    // Initialize temporary file structures
     temp_files = new Heapfile[ARBIT_RUNS];
     n_tempfiles = ARBIT_RUNS;
     n_tuples = new int[ARBIT_RUNS];
-    // n_runs = ARBIT_RUNS; // Removed, use Nruns for actual count, n_tempfiles for capacity
 
-    // Do not create temp_files[0] here, it will be created on demand
-    // try {
-    //   temp_files[0] = new Heapfile(null); // First temp file is created here
-    // }
-    // catch (Exception e) {
-    //   throw new SortException(e, "Sort.java: Heapfile error");
-    // }
-
-    o_buf = new OBuf(); // Initialize output buffer object
-    // o_buf.init(...) // Initialization moved to where it's first needed
-
-    // *** FIX: Calculate max_elems_in_heap based on available memory ***
-    // Estimate how many tuples can fit in the available buffer pages for the heap.
-    // Subtract a few pages for safety/overhead (input buffer, output buffer, heap file directory pages).
+    o_buf = new OBuf(); 
+ 
     int pages_for_heap = Math.max(1, _n_pages - 3); // Use at least 1 page, reserve some for I/O
     max_elems_in_heap = (int) Math.floor((double) pages_for_heap * GlobalConst.MINIBASE_PAGESIZE / tuple_size);
     if (max_elems_in_heap <= 0) {
@@ -191,8 +177,6 @@ public class Sort extends Iterator implements GlobalConst
         max_elems_in_heap = 1; // Or throw an error if insufficient memory
         System.err.println("Warning: Calculated max_elems_in_heap is <= 0. Setting to 1. Check buffer pool size and tuple size.");
     }
-    System.out.println("DEBUG: Sort Constructor - Calculated max_elems_in_heap = " + max_elems_in_heap);
-    // *** END FIX ***
 
     sortFldLen = sort_fld_len;
 
@@ -257,8 +241,7 @@ public class Sort extends Iterator implements GlobalConst
       // Estimate max tuples that can fit in memory buffer pages
       // Use the calculated max_elems_in_heap as the threshold for internal buffer size
       int max_tuples_in_mem = max_elems_in_heap;
-      System.out.println("DEBUG: Sort.get_next() - Using max_tuples_in_mem = " + max_tuples_in_mem +
-                         " (based on calculated max_elems_in_heap)");
+
 
       // Read tuples from input iterator
       while ((tuple = _am.get_next()) != null) {
@@ -267,9 +250,6 @@ public class Sort extends Iterator implements GlobalConst
 
           // Check if we've exceeded the memory capacity
           if (max_tuples_in_mem > 0 && tups_read > max_tuples_in_mem) {
-              System.out.println("DEBUG: Sort.get_next() - Buffer full! tups_read=" + tups_read +
-                                 ", max_tuples_in_mem=" + max_tuples_in_mem +
-                                 ". Triggering external sort.");
               external_sort_needed = true;
 
               // *** FIX: Write buffered tuples to the first run ***
@@ -302,10 +282,8 @@ public class Sort extends Iterator implements GlobalConst
                       n_tuples[0]++; // Count tuples in the first run
                   }
                   o_buf.flush(); // Flush the first run
-                  System.out.println("DEBUG: Sort.get_next() - Wrote " + n_tuples[0] + " buffered tuples to first run file: " + temp_files[0].get_fileName());
 
-                  // Generate remaining runs starting from run 1 (index 1)
-                  // Pass the calculated max_elems_in_heap
+
                   int remainingRuns = generate_runs(max_elems_in_heap, sortAttrType, sortFldLen, 1); // Pass starting run index 1
                   Nruns += remainingRuns; // Add the number of newly generated runs
 
@@ -313,23 +291,16 @@ public class Sort extends Iterator implements GlobalConst
                   setup_for_merge(tuple_size, Nruns);
 
               } catch (Exception e) {
-                  // Print stack trace for detailed debugging
                   e.printStackTrace();
                   throw new SortException(e, "Sort.java: Error writing first run or generating subsequent runs");
               }
-              // *** END FIX ***
-              break; // Exit the read loop after handling overflow
+              break; 
           } else {
-              // Still fits in memory, add to internal buffer list
               internalBuffer.add(tupleCopy);
           }
-      } // End while reading input
-
-      System.out.println("DEBUG: Sort.get_next() - Finished reading input. Total tuples read: " + tups_read);
+      } 
 
       if (!external_sort_needed) {
-          System.out.println("DEBUG: Sort.get_next() - Performing internal sort. All " + tups_read + " tuples fit in memory.");
-          // All tuples fit in memory, sort the internal buffer and load into Q
           Nruns = 0; // Explicitly mark as internal sort
 
           if (internalBuffer != null && !internalBuffer.isEmpty()) {
@@ -369,45 +340,31 @@ public class Sort extends Iterator implements GlobalConst
           o_buf = null; // Ensure o_buf (for runs) is null
 
       } else if (Nruns > 0) {
-          // External sort was triggered and runs were generated
-          System.out.println("DEBUG: Sort.get_next() - External sort finished generation. Setting up for merge of " + Nruns + " runs.");
-          // Ensure op_buf is initialized for returning tuples
           if (op_buf == null) op_buf = new Tuple(tuple_size);
           try { op_buf.setHdr(n_cols, _in, str_lens); } catch (Exception e) { throw new SortException(e, "Sort.java: op_buf.setHdr() failed"); }
-          // setup_for_merge was already called in the external sort transition block
       } else {
-          // External sort triggered but generate_runs produced 0 runs (e.g., empty input after overflow point)
-          System.out.println("DEBUG: Sort.get_next() - External sort triggered but 0 runs generated (or only 1 run created).");
-          // If Nruns is 1, setup_for_merge might still be needed if the first run was written
           if (Nruns == 1 && temp_files != null && temp_files[0] != null) {
-               System.out.println("DEBUG: Sort.get_next() - Only one run generated, setting up to read from it.");
                setup_for_merge(tuple_size, Nruns); // Setup to read from the single run
           } else {
                return null; // No data to return
           }
       }
 
-    } // End if (first_time)
+    } 
 
-    // *** FIX: Check k limit *before* retrieving the next tuple ***
     if (k > 0 && tuples_returned >= k) {
-        // Already returned k tuples, stop iteration.
         return null;
     }
 
-    // Check if merge queue (Q) is initialized and not empty
-    // Q is now used for both internal and external results
     if (Q == null || Q.empty()) {
-      // no more tuples available
       return null;
     }
 
     output_tuple = delete_min(); // Get the next tuple in sorted order (from internalQ or merge)
 
     if (output_tuple != null){
-      // We got a tuple, increment the counter and return a copy
-      tuples_returned++; // *** Increment counter ***
-      // Ensure op_buf is ready (should have been initialized in first_time block)
+    
+      tuples_returned++; 
       if (op_buf == null) {
            throw new SortException("Sort.java: op_buf is null when returning tuple");
       }
@@ -415,10 +372,10 @@ public class Sort extends Iterator implements GlobalConst
       return op_buf;
     }
     else {
-      // delete_min returned null, signifies end of data
+     
       return null;
     }
-  }  // End get_next
+  } 
 
 
   /**
@@ -574,21 +531,16 @@ public class Sort extends Iterator implements GlobalConst
         try { MAX_VAL(lastElem, sortFldType); } catch (Exception e) { throw new SortException(e, "MAX_VAL failed"); }
         lastElemDistance = Double.POSITIVE_INFINITY; // For vector distance comparison
     }
-    // Note: Initial distance calculation for MIN/MAX vector might be needed if comparison logic requires it.
 
-    // Ensure temp_files and n_tuples arrays are large enough for the starting index
     if (run_num >= n_tempfiles) {
         expand_temp_arrays(run_num + 1); // Expand to accommodate at least the starting run index
     }
 
-    // Setup the output buffer for the first run to be generated by this call
     try {
         // Create heap file for the current run if it doesn't exist
         if (temp_files[run_num] == null) {
              temp_files[run_num] = new Heapfile(null);
-             System.out.println("DEBUG: Sort.generate_runs - Created temp file for run " + run_num + ": " + temp_files[run_num].get_fileName());
         } else {
-             System.out.println("DEBUG: Sort.generate_runs - Using existing temp file for run " + run_num + ": " + temp_files[run_num].get_fileName());
         }
         // Initialize output buffer for this run
         o_buf.init(bufs, _n_pages, tuple_size, temp_files[run_num], false);
@@ -636,9 +588,7 @@ public class Sort extends Iterator implements GlobalConst
                 (comp_res > 0 && order.tupleOrder == TupleOrder.Descending)) {
                 // Tuple doesn't fit in the current run, add to the 'other' heap
                 if (p_elems_other_Q == max_elems) {
-                    // This case should ideally not happen with replacement selection logic below
-                    // If it does, it means both heaps are full, which needs careful handling.
-                    // For simplicity, we might throw an error or handle based on specific strategy.
+
                     throw new SortException("Sort.java: generate_runs - Both heaps full, unexpected state.");
                 }
                 try {
@@ -648,21 +598,14 @@ public class Sort extends Iterator implements GlobalConst
             } else {
                 // Tuple fits in the current run, add to the 'current' heap
                 if (p_elems_curr_Q == max_elems) {
-                    // Current heap is full, need to extract the min/max element to write
-                    pnode node_to_write = pcurr_Q.deq(); // Get the best element for the current run
+                    pnode node_to_write = pcurr_Q.deq();
                     p_elems_curr_Q--;
-
-                    // Write this element to the output buffer
                     o_buf.Put(node_to_write.tuple);
                     n_tuples[run_num]++;
-
-                    // Update lastElem and its distance
                     TupleUtils.SetValue(lastElem, node_to_write.tuple, _sort_fld, sortFldType);
                     if (sortFldType.attrType == AttrType.attrVector100D && Target != null) {
                         lastElemDistance = node_to_write.distance;
                     }
-
-                    // Now add the new input tuple to the current heap
                     try {
                         pcurr_Q.enq(cur_node);
                     } catch (Exception e) { throw new SortException(e, "Sort.java: error enqueuing new node after replacement"); }
@@ -676,20 +619,14 @@ public class Sort extends Iterator implements GlobalConst
                 }
             }
         } else {
-            // Input iterator is exhausted (tuple == null)
-            // Break the loop to proceed to flushing remaining elements
             break;
         }
 
-        // Check if the current heap is empty (can happen if max_elems is small or input pattern matches)
-        // If empty, and the other heap has elements, switch heaps to start a new run.
         if (p_elems_curr_Q == 0 && p_elems_other_Q > 0) {
-            // Flush the (now finished) current run
             if (n_tuples[run_num] > 0 || o_buf.GetNumOfTuples() > 0) { // Only count if data was written
                  n_tuples[run_num] = (int) o_buf.flush();
                  runs_generated_this_call++;
             } else {
-                 // If the run was empty, potentially reuse the file slot? Or just mark count as 0.
                  n_tuples[run_num] = 0;
             }
             run_num++;
@@ -774,8 +711,6 @@ public class Sort extends Iterator implements GlobalConst
         }
         n_tuples[run_num] = (int) o_buf.flush(); // Flush the final run
     }
-
-    System.out.println("DEBUG: Sort.generate_runs(start=" + start_run_index + ") - Finished. New runs generated: " + runs_generated_this_call);
     return runs_generated_this_call; // Return the count of *new* runs created by this call
 }
 
@@ -848,14 +783,11 @@ public class Sort extends Iterator implements GlobalConst
                     throw new SortException(e, "Sort.java: TupleUtilsException caught from Q.enq() in delete_min");
                 }
             } else {
-                // Get() returned null, indicating the run is now exhausted.
-                // Do nothing, the queue will not be refilled from this run.
-                System.err.println("********** Debug: Run " + cur_node.run_num + " exhausted in delete_min ***************");
+
             }
         } // end if run not exhausted
-    } // End of Nruns > 0 block (external sort refill logic)
+    } //external sort refill logic
 
-    // Return the tuple that was originally dequeued
     return old_tuple;
   }
 
@@ -968,12 +900,6 @@ public class Sort extends Iterator implements GlobalConst
         catch (Exception e) {
           throw new SortException(e, "Sort.java: BUFmgr error");
         }
-        // Invalidate page IDs in local array (optional, helps debugging)
-        // if (bufs_pids != null) {
-        //     for (int i=0; i<_n_pages; i++) {
-        //         if (bufs_pids[i] != null) bufs_pids[i].pid = INVALID_PAGE;
-        //     }
-        // }
       }
 
       // Close and delete temporary run files
@@ -982,7 +908,6 @@ public class Sort extends Iterator implements GlobalConst
           for (int i = 0; i < Nruns; i++) {
             if (temp_files[i] != null) {
               try {
-                System.out.println("DEBUG: Sort.close() - Deleting temp file: " + temp_files[i].get_fileName());
                 temp_files[i].deleteFile();
               }
               catch (Exception e) {
@@ -1018,19 +943,17 @@ public class Sort extends Iterator implements GlobalConst
    */
   private void expand_temp_arrays(int required_size) {
       int new_size = Math.max(n_tempfiles * 2, required_size); // Double the size or meet requirement
-      System.out.println("DEBUG: Sort.expand_temp_arrays - Expanding to size: " + new_size);
 
       Heapfile[] temp1 = new Heapfile[new_size];
       System.arraycopy(temp_files, 0, temp1, 0, n_tempfiles);
       temp_files = temp1;
 
       int[] temp2 = new int[new_size];
-      // Copy only up to the current capacity (n_tempfiles) or actual runs (Nruns)?
-      // Copying up to n_tempfiles seems safer if n_tuples was sized with it.
+
       System.arraycopy(n_tuples, 0, temp2, 0, n_tempfiles);
       n_tuples = temp2;
 
-      n_tempfiles = new_size; // Update the capacity tracker
+      n_tempfiles = new_size; 
       // n_runs = new_size; // Removed, Nruns tracks actual runs
   }
 

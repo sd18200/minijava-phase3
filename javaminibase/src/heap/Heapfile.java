@@ -1,6 +1,8 @@
 package heap;
 
 import java.io.*;
+
+import btree.UnpinPageException;
 import diskmgr.*;
 import bufmgr.*;
 import global.*;
@@ -222,17 +224,13 @@ public class Heapfile implements Filetype,  GlobalConst {
        HFDiskMgrException,
        IOException
 {
-  System.out.println("DEBUG: Heapfile constructor started for: " + name);
-  System.out.println("DEBUG: Current time: " + System.currentTimeMillis());
-  
-  // Give us a prayer of destructing cleanly if construction fails.
+
   _file_deleted = true;
   _fileName = null;
   
   if(name == null) 
   {
     // If the name is NULL, allocate a temporary name
-    // and no logging is required.
     _fileName = "tempHeapFile";
     String useId = new String("user.name");
     String userAccName;
@@ -243,13 +241,11 @@ public class Heapfile implements Filetype,  GlobalConst {
     _fileName = _fileName + filenum; 
     _ftype = TEMP;
     tempfilecount++;
-    System.out.println("DEBUG: Created temporary file name: " + _fileName);
   }
   else
   {
     _fileName = name;
     _ftype = ORDINARY;    
-    System.out.println("DEBUG: Using provided file name: " + _fileName);
   }
   
   // The constructor gets run in two different cases.
@@ -260,51 +256,36 @@ public class Heapfile implements Filetype,  GlobalConst {
   // the header page into the buffer pool
   
   // try to open the file
-  System.out.println("DEBUG: Trying to open the file");
   
   Page apage = new Page();
   _firstDirPageId = null;
   
-  System.out.println("DEBUG: About to call get_file_entry for " + _fileName);
   long startTime = System.currentTimeMillis();
   
   if (_ftype == ORDINARY)
     _firstDirPageId = get_file_entry(_fileName);
   
-  System.out.println("DEBUG: get_file_entry completed in " + (System.currentTimeMillis() - startTime) + " ms");
-  System.out.println("DEBUG: File exists? " + (_firstDirPageId != null ? "Yes" : "No"));
   
   if(_firstDirPageId == null)
   {
-    // file doesn't exist. First create it.
-    System.out.println("DEBUG: Creating new page for first directory page");
+
     startTime = System.currentTimeMillis();
     
     _firstDirPageId = newPage(apage, 1);
-    
-    System.out.println("DEBUG: newPage completed in " + (System.currentTimeMillis() - startTime) + " ms");
-    System.out.println("DEBUG: New page id: " + (_firstDirPageId != null ? _firstDirPageId.pid : "null"));
     
     // check error
     if(_firstDirPageId == null)
       throw new HFException(null, "can't new page");
     
-    // Before add_file_entry - THIS IS THE CRITICAL POINT
-    System.out.println("DEBUG: About to add file entry for: " + _fileName + 
-                    ", pageId: " + (_firstDirPageId.pid));
     startTime = System.currentTimeMillis();
     
     try {
       add_file_entry(_fileName, _firstDirPageId);
-      System.out.println("DEBUG: add_file_entry completed in " + (System.currentTimeMillis() - startTime) + " ms");
     } catch (Exception e) {
-      System.out.println("DEBUG: CRITICAL ERROR in add_file_entry: " + e);
       e.printStackTrace();
       throw e;
     }
-    
-    // After initializing directory page
-    System.out.println("DEBUG: Initializing first directory page");
+
     HFPage firstDirPage = new HFPage();
     firstDirPage.init(_firstDirPageId, apage);
     PageId pageId = new PageId(INVALID_PAGE);
@@ -312,16 +293,12 @@ public class Heapfile implements Filetype,  GlobalConst {
     firstDirPage.setNextPage(pageId);
     firstDirPage.setPrevPage(pageId);
     
-    System.out.println("DEBUG: About to unpin first directory page");
     unpinPage(_firstDirPageId, true /*dirty*/ );
-    System.out.println("DEBUG: Unpinned first directory page");
   }
   else {
-    System.out.println("DEBUG: File already exists, first directory page id: " + _firstDirPageId.pid);
   }
   
   _file_deleted = false;
-  System.out.println("DEBUG: Heapfile constructor completed successfully for: " + _fileName);
 } // end of constructor 
   
   /** Return number of records in file.
@@ -644,138 +621,187 @@ public class Heapfile implements Filetype,  GlobalConst {
    *
    * @return true record deleted  false:record not found
    */
-  public boolean deleteRecord(RID rid)  
-    throws InvalidSlotNumberException, 
-	   InvalidTupleSizeException, 
-	   HFException, 
-	   HFBufMgrException,
-	   HFDiskMgrException,
-	   Exception
-  
-    {
-      boolean status;
-      HFPage currentDirPage = new HFPage();
-      PageId currentDirPageId = new PageId();
-      HFPage currentDataPage = new HFPage();
-      PageId currentDataPageId = new PageId();
-      RID currentDataPageRid = new RID();
-      
-      status = _findDataPage(rid,
-			     currentDirPageId, currentDirPage, 
-			     currentDataPageId, currentDataPage,
-			     currentDataPageRid);
-      
-      if(status != true) return status;	// record not found
-      
-      // ASSERTIONS:
-      // - currentDirPage, currentDirPageId valid and pinned
-      // - currentDataPage, currentDataPageid valid and pinned
-      
-      // get datapageinfo from the current directory page:
-      Tuple atuple;	
-      
-      atuple = currentDirPage.returnRecord(currentDataPageRid);
-      DataPageInfo pdpinfo = new DataPageInfo(atuple);
-      
-      // delete the record on the datapage
-      currentDataPage.deleteRecord(rid);
-      
-      pdpinfo.recct--;
-      pdpinfo.flushToTuple();	//Write to the buffer pool
-      if (pdpinfo.recct >= 1) 
-	{
-	  // more records remain on datapage so it still hangs around.  
-	  // we just need to modify its directory entry
-	  
-	  pdpinfo.availspace = currentDataPage.available_space();
-	  pdpinfo.flushToTuple();
-	  unpinPage(currentDataPageId, true /* = DIRTY*/);
-	  
-	  unpinPage(currentDirPageId, true /* = DIRTY */);
-	  
-	  
-	}
-      else
-	{
-	  // the record is already deleted:
-	  // we're removing the last record on datapage so free datapage
-	  // also, free the directory page if 
-	  //   a) it's not the first directory page, and 
-	  //   b) we've removed the last DataPageInfo record on it.
-	  
-	  // delete empty datapage: (does it get unpinned automatically? -NO, Ranjani)
-	  unpinPage(currentDataPageId, false /*undirty*/);
-	  
-	  freePage(currentDataPageId);
-	  
-	  // delete corresponding DataPageInfo-entry on the directory page:
-	  // currentDataPageRid points to datapage (from for loop above)
-	  
-	  currentDirPage.deleteRecord(currentDataPageRid);
-	  
-	  
-	  // ASSERTIONS:
-	  // - currentDataPage, currentDataPageId invalid
-	  // - empty datapage unpinned and deleted
-	  
-	  // now check whether the directory page is empty:
-	  
-	  currentDataPageRid = currentDirPage.firstRecord();
-	  
-	  // st == OK: we still found a datapageinfo record on this directory page
-	  PageId pageId;
-	  pageId = currentDirPage.getPrevPage();
-	  if((currentDataPageRid == null)&&(pageId.pid != INVALID_PAGE))
-	    {
-	      // the directory-page is not the first directory page and it is empty:
-	      // delete it
-	      
-	      // point previous page around deleted page:
-	      
-	      HFPage prevDirPage = new HFPage();
-	      pinPage(pageId, prevDirPage, false);
+  public boolean deleteRecord(RID rid)
+    throws InvalidSlotNumberException,
+           InvalidTupleSizeException,
+           HFException,
+           HFBufMgrException,
+           HFDiskMgrException,
+           Exception
 
-	      pageId = currentDirPage.getNextPage();
-	      prevDirPage.setNextPage(pageId);
-	      pageId = currentDirPage.getPrevPage();
-	      unpinPage(pageId, true /* = DIRTY */);
-	      
-	      
-	      // set prevPage-pointer of next Page
-	      pageId = currentDirPage.getNextPage();
-	      if(pageId.pid != INVALID_PAGE)
-		{
-		  HFPage nextDirPage = new HFPage();
-		  pageId = currentDirPage.getNextPage();
-		  pinPage(pageId, nextDirPage, false);
-		  
-		  //nextDirPage.openHFpage(apage);
-		  
-		  pageId = currentDirPage.getPrevPage();
-		  nextDirPage.setPrevPage(pageId);
-		  pageId = currentDirPage.getNextPage();
-		  unpinPage(pageId, true /* = DIRTY */);
-		  
-		}
-	      
-	      // delete empty directory page: (automatically unpinned?)
-	      unpinPage(currentDirPageId, false/*undirty*/);
-	      freePage(currentDirPageId);
-	      
-	      
-	    }
-	  else
-	    {
-	      // either (the directory page has at least one more datapagerecord
-	      // entry) or (it is the first directory page):
-	      // in both cases we do not delete it, but we have to unpin it:
-	      
-	      unpinPage(currentDirPageId, true /* == DIRTY */);
-	      
-	      
-	    }
-	}
-      return true;
+    {
+      boolean status = false; // Assume failure initially
+      HFPage currentDirPage = new HFPage();
+      PageId currentDirPageId = new PageId(INVALID_PAGE); // Initialize PageId to invalid
+      HFPage currentDataPage = new HFPage();
+      PageId currentDataPageId = new PageId(INVALID_PAGE); // Initialize PageId to invalid
+      RID currentDataPageRid = new RID(); // rid of data page info on directory page
+      boolean dataPageDirty = false; // Track if data page needs to be marked dirty
+      boolean dirPageDirty = false;  // Track if directory page needs to be marked dirty
+      boolean foundDataPage = false; // Flag to track if _findDataPage succeeded
+
+      // Use try-finally to ensure pages are unpinned
+      try {
+          foundDataPage = _findDataPage(rid,
+                                 currentDirPageId, currentDirPage,
+                                 currentDataPageId, currentDataPage,
+                                 currentDataPageRid);
+
+          if (!foundDataPage) {
+              // Record or page not found by _findDataPage.
+              // _findDataPage should handle unpinning pages it pinned on failure.
+              return false;
+          }
+
+          // ASSERTIONS after successful _findDataPage:
+          // - currentDirPage, currentDirPageId valid and pinned (ASSUMING _findDataPage works correctly)
+          // - currentDataPage, currentDataPageId valid and pinned (ASSUMING _findDataPage works correctly)
+
+          // Get datapageinfo from the current directory page:
+          Tuple atuple = currentDirPage.returnRecord(currentDataPageRid);
+          DataPageInfo pdpinfo = new DataPageInfo(atuple);
+
+          // Delete the record on the data page
+          try {
+              currentDataPage.deleteRecord(rid); // This might throw InvalidSlotNumberException
+              dataPageDirty = true; // Mark data page dirty only if deleteRecord succeeds
+          } catch (InvalidSlotNumberException e) {
+              // If deleteRecord fails (e.g., invalid slot), we still need to unpin.
+              // The finally block below will handle the unpinning.
+              // Pages are not marked dirty in this case.
+              status = false; // Ensure status remains false
+              throw e; // Rethrow the specific exception
+          }
+
+          // If deleteRecord succeeded, update the directory page entry
+          pdpinfo.recct--;
+          pdpinfo.flushToTuple(); // Write changes back to the tuple buffer in memory
+          dirPageDirty = true; // Mark directory page dirty as its content (pdpinfo) changed
+
+          if (pdpinfo.recct >= 1)
+          {
+              // more records remain on datapage so it still hangs around.
+              // we just need to modify its directory entry
+              pdpinfo.availspace = currentDataPage.available_space();
+              pdpinfo.flushToTuple(); // Write availspace changes back
+              // Pages will be unpinned in the finally block with correct dirty status
+          }
+          else
+          {
+              // the record is already deleted:
+              // we're removing the last record on datapage so free datapage
+              // also, free the directory page if
+              //   a) it's not the first directory page, and
+              //   b) we've removed the last DataPageInfo record on it.
+
+              // Free the empty datapage. It's already marked dirty=true if delete succeeded.
+              // We need to unpin it first (without marking dirty again) before freeing.
+              try {
+                  unpinPage(currentDataPageId, false /* data page is going away, don't write */);
+                  dataPageDirty = false; // Reset flag as it's handled by this unpin
+              } catch (HFBufMgrException eUnpin) {
+                  // This might happen if _findDataPage already unpinned it - log warning
+                  System.err.println("Warning: Data page " + currentDataPageId.pid + " was already unpinned before freeing.");
+                  dataPageDirty = false; // Ensure flag is false
+              } catch (Exception eUnpin) {
+                  System.err.println("Warning: Error unpinning data page " + currentDataPageId.pid + " before freeing: " + eUnpin);
+                  // Continue to free page anyway if possible
+              }
+              freePage(currentDataPageId);
+              currentDataPageId.pid = INVALID_PAGE; // Mark as invalid so finally block ignores it
+
+              // delete corresponding DataPageInfo-entry on the directory page:
+              // Note: currentDirPage is still pinned here
+              currentDirPage.deleteRecord(currentDataPageRid);
+              dirPageDirty = true; // Directory page was modified
+
+              // now check whether the directory page is empty:
+              RID firstRecOnDir = currentDirPage.firstRecord();
+              PageId prevPageId = currentDirPage.getPrevPage();
+
+              if ((firstRecOnDir == null) && (prevPageId.pid != INVALID_PAGE))
+              {
+                  // the directory-page is not the first directory page and it is empty:
+                  // delete it
+
+                  // point previous page around deleted page:
+                  HFPage prevDirPage = new HFPage();
+                  PageId tempPrevPageId = new PageId(prevPageId.pid); // Use a copy
+                  pinPage(tempPrevPageId, prevDirPage, false);
+
+                  PageId nextPageId = currentDirPage.getNextPage();
+                  prevDirPage.setNextPage(nextPageId);
+                  unpinPage(tempPrevPageId, true /* = DIRTY */);
+
+
+                  // set prevPage-pointer of next Page
+                  PageId tempNextPageId = new PageId(nextPageId.pid); // Use a copy
+                  if(tempNextPageId.pid != INVALID_PAGE)
+                  {
+                      HFPage nextDirPage = new HFPage();
+                      pinPage(tempNextPageId, nextDirPage, false);
+                      nextDirPage.setPrevPage(tempPrevPageId); // Use the ID of the *previous* page
+                      unpinPage(tempNextPageId, true /* = DIRTY */);
+                  }
+
+                  // delete empty directory page:
+                  try {
+                      // Unpin the directory page we are about to free
+                      unpinPage(currentDirPageId, false /* dir page is going away, don't write */);
+                      dirPageDirty = false; // Reset flag as it's handled by this unpin
+                  } catch (HFBufMgrException eUnpin) {
+                      // This might happen if _findDataPage already unpinned it - log warning
+                      System.err.println("Warning: Directory page " + currentDirPageId.pid + " was already unpinned before freeing.");
+                      dirPageDirty = false; // Ensure flag is false
+                  } catch (Exception eUnpin) {
+                      System.err.println("Warning: Error unpinning directory page " + currentDirPageId.pid + " before freeing: " + eUnpin);
+                      // Continue to free page anyway if possible
+                  }
+                  freePage(currentDirPageId);
+                  currentDirPageId.pid = INVALID_PAGE; // Mark as invalid so finally block ignores it
+              }
+              else
+              {
+                  // either (the directory page has at least one more datapagerecord
+                  // entry) or (it is the first directory page):
+                  // in both cases we do not delete it, but we have to unpin it
+                  // (handled in finally block).
+              }
+          }
+
+          status = true; // Mark overall operation as successful *only if no exception occurred*
+          return true; // Deletion successful
+
+      } finally {
+          // Ensure pages pinned by _findDataPage (and not already handled above) are unpinned.
+          // Check if IDs are valid before attempting to unpin.
+
+          // Unpin Data Page if it's still valid and was found
+          if (foundDataPage && currentDataPageId != null && currentDataPageId.pid != INVALID_PAGE) {
+              try {
+                  unpinPage(currentDataPageId, dataPageDirty);
+              } catch (HFBufMgrException eUnpin) {
+                  // Log specific warning for already unpinned page
+                  System.err.println("Warning: Data page " + currentDataPageId.pid + " was already unpinned in deleteRecord finally block.");
+              } catch (Exception eUnpin) {
+                  // Log generic warning for other unpin errors
+                  System.err.println("Warning: Error unpinning data page " + currentDataPageId.pid + " in deleteRecord finally: " + eUnpin);
+              }
+          }
+
+          // Unpin Directory Page if it's still valid and was found
+          if (foundDataPage && currentDirPageId != null && currentDirPageId.pid != INVALID_PAGE) {
+              try {
+                  unpinPage(currentDirPageId, dirPageDirty);
+              } catch (HFBufMgrException eUnpin) {
+                  // Log specific warning for already unpinned page
+                  System.err.println("Warning: Directory page " + currentDirPageId.pid + " was already unpinned in deleteRecord finally block.");
+              } catch (Exception eUnpin) {
+                  // Log generic warning for other unpin errors
+                  System.err.println("Warning: Error unpinning directory page " + currentDirPageId.pid + " in deleteRecord finally: " + eUnpin);
+              }
+          }
+      }
     }
   
   
@@ -928,7 +954,6 @@ public class Heapfile implements Filetype,  GlobalConst {
       if(_file_deleted )
         throw new FileAlreadyDeletedException(null, "file alread deleted");
 
-      System.out.println("DEBUG: Heapfile.deleteFile() started for: " + _fileName); // ADDED
 
       // Mark the deleted flag (even if it doesn't get all the way done).
       _file_deleted = true;
@@ -944,54 +969,40 @@ public class Heapfile implements Filetype,  GlobalConst {
 
       // Need to handle the case where _firstDirPageId might be invalid if file creation failed partially
       if (currentDirPageId == null || currentDirPageId.pid == INVALID_PAGE) {
-          System.out.println("DEBUG: Heapfile.deleteFile() - _firstDirPageId is invalid, attempting to delete file entry only.");
           try {
               delete_file_entry( _fileName );
           } catch (Exception e) {
-               System.err.println("DEBUG: Heapfile.deleteFile() - Error deleting file entry when _firstDirPageId was invalid: " + e);
           }
-          return; // Nothing more to deallocate
+          return; 
       }
 
 
       pinPage(currentDirPageId, currentDirPage, false);
-      //currentDirPage.openHFpage(pageinbuffer);
 
       RID rid = new RID();
       while(currentDirPageId.pid != INVALID_PAGE)
         {
-          System.out.println("DEBUG: Heapfile.deleteFile() - Processing DirPage: " + currentDirPageId.pid); // ADDED
           for(rid = currentDirPage.firstRecord();
               rid != null;
               rid = currentDirPage.nextRecord(rid))
             {
               atuple = currentDirPage.getRecord(rid);
               DataPageInfo dpinfo = new DataPageInfo( atuple);
-              //int dpinfoLen = arecord.length;
-
-              System.out.println("DEBUG: Heapfile.deleteFile() - Freeing DataPage: " + dpinfo.pageId.pid); // ADDED
               freePage(dpinfo.pageId);
 
             }
-          // ASSERTIONS:
-          // - we have freePage()'d all data pages referenced by
-          // the current directory page.
 
           nextDirPageId = currentDirPage.getNextPage();
-          System.out.println("DEBUG: Heapfile.deleteFile() - Freeing DirPage: " + currentDirPageId.pid); // ADDED
-          freePage(currentDirPageId); // This also unpins implicitly via BufMgr.freePage
+          freePage(currentDirPageId); 
 
           currentDirPageId.pid = nextDirPageId.pid;
           if (nextDirPageId.pid != INVALID_PAGE)
             {
               pinPage(currentDirPageId, currentDirPage, false);
-              //currentDirPage.openHFpage(pageinbuffer);
             }
         }
 
-      System.out.println("DEBUG: Heapfile.deleteFile() - Deleting file entry from DB directory: " + _fileName); // ADDED
       delete_file_entry( _fileName );
-      System.out.println("DEBUG: Heapfile.deleteFile() finished for: " + _fileName); // ADDED
     }
   
   /**
@@ -1008,7 +1019,7 @@ public class Heapfile implements Filetype,  GlobalConst {
       throw new HFBufMgrException(e,"Heapfile.java: pinPage() failed");
     }
     
-  } // end of pinPage
+  } 
 
   /**
    * short cut to access the unpinPage function in bufmgr package.
@@ -1024,7 +1035,7 @@ public class Heapfile implements Filetype,  GlobalConst {
       throw new HFBufMgrException(e,"Heapfile.java: unpinPage() failed");
     }
 
-  } // end of unpinPage
+  } 
 
   private void freePage(PageId pageno)
     throws HFBufMgrException {
@@ -1036,7 +1047,7 @@ public class Heapfile implements Filetype,  GlobalConst {
       throw new HFBufMgrException(e,"Heapfile.java: freePage() failed");
     }
 
-  } // end of freePage
+  } 
 
   private PageId newPage(Page page, int num)
     throws HFBufMgrException {
@@ -1052,7 +1063,7 @@ public class Heapfile implements Filetype,  GlobalConst {
 
     return tmpId;
 
-  } // end of newPage
+  }
 
   private PageId get_file_entry(String filename)
     throws HFDiskMgrException {
@@ -1060,18 +1071,15 @@ public class Heapfile implements Filetype,  GlobalConst {
     PageId tmpId = new PageId();
 
     try {
-      System.out.println("DEBUG: Heapfile.get_file_entry - About to call SystemDefs.JavabaseDB.get_file_entry for: " + filename); // Add this line
       tmpId = SystemDefs.JavabaseDB.get_file_entry(filename);
-      System.out.println("DEBUG: Heapfile.get_file_entry - SystemDefs.JavabaseDB.get_file_entry returned: " + (tmpId == null ? "null" : tmpId.pid)); // Add this line
     }
     catch (Exception e) {
-      System.err.println("DEBUG: Heapfile.get_file_entry - Exception caught from SystemDefs.JavabaseDB.get_file_entry: " + e); // Add this line
       throw new HFDiskMgrException(e,"Heapfile.java: get_file_entry() failed");
     }
 
     return tmpId;
 
-  } // end of get_file_entry
+  } 
 
   private void add_file_entry(String filename, PageId pageno)
     throws HFDiskMgrException {
@@ -1083,7 +1091,7 @@ public class Heapfile implements Filetype,  GlobalConst {
       throw new HFDiskMgrException(e,"Heapfile.java: add_file_entry() failed");
     }
 
-  } // end of add_file_entry
+  } 
 
   private void delete_file_entry(String filename)
     throws HFDiskMgrException {
@@ -1095,8 +1103,6 @@ public class Heapfile implements Filetype,  GlobalConst {
       throw new HFDiskMgrException(e,"Heapfile.java: delete_file_entry() failed");
     }
 
-  } // end of delete_file_entry
-
-
+  } 
   
-}// End of HeapFile
+}

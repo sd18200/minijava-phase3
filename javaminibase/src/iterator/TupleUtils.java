@@ -47,14 +47,12 @@ public class TupleUtils
 
      // --- Standard comparison logic based ONLY on fldType (attribute type) ---
      // Assumes t2 contains a value compatible with fldType for comparison.
-     System.out.println("DEBUG: TupleUtils (Simplified) - Entering switch for type: " + fldType.attrType);
      switch (fldType.attrType) {
       case AttrType.attrInteger:
           try {
               t1_i = t1.getIntFld(t1_fld_no);
               // Assuming t2 contains an Integer literal if fldType is Integer
               t2_i = t2.getIntFld(t2_fld_no);
-              System.out.println("DEBUG: TupleUtils (Switch - Int case): Comparing " + t1_i + " vs " + t2_i);
           } catch (Exception e) {
               throw new TupleUtilsException(e, "Type mismatch or error comparing integers. Field " + t1_fld_no + " vs " + t2_fld_no);
           }
@@ -63,24 +61,18 @@ public class TupleUtils
           return 1;
 
       case AttrType.attrReal: // Handles Real vs Real comparison ('N' case or 'H' fallback)
-          System.out.println("DEBUG: TupleUtils.CompareTupleWithTuple (Switch - Real case) - Entered Real vs Real.");
           try {
               // We know t1 is Real (fldType).
               // We assume t2 contains a Real literal because the Real vs Int case is handled earlier.
               t1_r = t1.getFloFld(t1_fld_no);
               t2_r = t2.getFloFld(t2_fld_no); // Assumes t2 holds a float
 
-              System.out.println("DEBUG: TupleUtils.CompareTupleWithTuple (Switch - Real case): Comparing " + t1_r + " vs " + t2_r);
               final float EPSILON = 0.00001f;
-              System.out.println("DEBUG: TupleUtils.CompareTupleWithTuple (Switch - Real case): Checking Math.abs(" + t1_r + " - " + t2_r + ") < " + EPSILON);
               if (Math.abs(t1_r - t2_r) < EPSILON) {
-                  System.out.println("DEBUG: TupleUtils.CompareTupleWithTuple (Switch - Real case): Values are equal within epsilon.");
                   return 0; // Considered equal
               } else if (t1_r < t2_r) {
-                  System.out.println("DEBUG: TupleUtils.CompareTupleWithTuple (Switch - Real case): t1 < t2.");
                   return -1; // t1 is smaller
               } else { // t1_r > t2_r
-                  System.out.println("DEBUG: TupleUtils.CompareTupleWithTuple (Switch - Real case): t1 > t2.");
                   return 1; // t1 is greater
               }
           } catch (Exception e) {
@@ -94,7 +86,6 @@ public class TupleUtils
           try {
               t1_s = t1.getStrFld(t1_fld_no);
               t2_s = t2.getStrFld(t2_fld_no); // Assumes t2 holds a string
-              System.out.println("DEBUG: TupleUtils (Switch - String case): Comparing \"" + t1_s + "\" vs \"" + t2_s + "\"");
           } catch (FieldNumberOutOfBoundException e){
               throw new TupleUtilsException(e, "FieldNumberOutOfBoundException comparing strings.");
           }
@@ -113,7 +104,6 @@ public class TupleUtils
               java.util.Arrays.fill(origin, 0);
               double distance1 = calculateEuclideanDistance(vector1, origin);
               double distance2 = calculateEuclideanDistance(vector2, origin);
-              System.out.println("DEBUG: TupleUtils (Switch - Vector case): Comparing Dist1=" + distance1 + " vs Dist2=" + distance2);
               return Double.compare(distance1, distance2);
           } catch (FieldNumberOutOfBoundException e) {
               throw new TupleUtilsException(e, "FieldNumberOutOfBoundException comparing vectors.");

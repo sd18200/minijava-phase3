@@ -85,8 +85,6 @@ public class PredEval
 
               // Set up the literal_tuple ('value') based on operand2
               AttrType literal_type = temp_ptr.type2;
-              System.out.println("DEBUG: PredEval.Eval (Case 1) - Literal type detected: " + literal_type.attrType);
-              // System.out.println("DEBUG: PredEval.Eval (Case 1) - Literal value (float): " + temp_ptr.operand2.real); // Log the value
 
 
               short[] literal_str_size = null;
@@ -110,7 +108,6 @@ public class PredEval
 
               // Perform comparison: attr_tuple vs literal_tuple
               int comp_res; // Declare comp_res
-              System.out.println("DEBUG: PredEval.Eval (Case 1) - Comparing attribute (type " + actual_comparison_type.attrType + ") vs literal (type " + literal_type.attrType + ")");
 
               // *** MODIFICATION START ***
               // Check for the special Real attribute vs. Integer literal case ('H' path)
@@ -119,34 +116,24 @@ public class PredEval
                       float t1_r = attr_tuple.getFloFld(attr_fld_no); // Get Real attribute
                       int t2_i = literal_tuple.getIntFld(literal_fld_no); // Get Int literal
                       int int_t1_r = (int) t1_r;                    // Cast attribute
-                      System.out.println("DEBUG: PredEval.Eval (H-case direct): Comparing (int)" + t1_r + " vs " + t2_i);
                       if (int_t1_r == t2_i) comp_res = 0;
                       else if (int_t1_r < t2_i) comp_res = -1;
                       else comp_res = 1;
-                      System.out.println("DEBUG: PredEval.Eval (H-case direct) - Comparison result: " + comp_res);
                       // Evaluate the result directly for this case
                       if (!evaluateOperator(comp_res, temp_ptr.op)) return false;
                   } catch (Exception e) {
                       throw new PredEvalException (e, "Error during explicit Real vs Int comparison.");
                   }
               }
-              // Handle Vector comparison separately
               else if (actual_comparison_type.attrType == AttrType.attrVector100D) {
                   if (literal_type.attrType != AttrType.attrVector100D) throw new PredEvalException("Cannot compare Vector attribute with non-Vector literal.");
                   int[] vec1 = attr_tuple.getVectorFld(attr_fld_no);
                   int[] vec2 = literal_tuple.getVectorFld(literal_fld_no);
                   double dist = TupleUtils.calculateEuclideanDistance(vec1, vec2);
-                  System.out.println("DEBUG: PredEval.Eval (Case 1 - Vector) - Calculated distance: " + dist + ", Threshold: " + temp_ptr.distance);
                   if (!evaluateVectorOperator(dist, temp_ptr.op, temp_ptr.distance)) return false;
-                  // Vector comparison handled, skip standard evaluation below
               }
-              // Standard comparison for all other non-vector types (including Real vs Real)
               else {
-                  // Use the simplified CompareTupleWithValue which calls CompareTupleWithTuple
-                  System.out.println("DEBUG: PredEval.Eval (Case 1 - Standard) - Calling simplified CompareTupleWithValue.");
                   comp_res = TupleUtils.CompareTupleWithValue(actual_comparison_type, attr_tuple, attr_fld_no, value); // Pass literal tuple 'value'
-                  System.out.println("DEBUG: PredEval.Eval (Case 1 - Standard) - CompareTupleWithValue result: " + comp_res);
-                  // Evaluate the result for standard cases
                   if (!evaluateOperator(comp_res, temp_ptr.op)) return false;
               }
               // *** MODIFICATION END ***
@@ -198,7 +185,6 @@ public class PredEval
 
               // Perform comparison: literal_tuple vs attr_tuple
               int comp_res; // Declare comp_res
-              System.out.println("DEBUG: PredEval.Eval (Case 2) - Comparing literal (type " + literal_type.attrType + ") vs attribute (type " + actual_comparison_type.attrType + ")");
 
               // *** MODIFICATION START ***
               // Check for the special Real literal vs. Integer attribute case
@@ -207,12 +193,9 @@ public class PredEval
                       float t1_r = literal_tuple.getFloFld(literal_fld_no); // Get Real literal
                       int t2_i = attr_tuple.getIntFld(attr_fld_no);       // Get Int attribute
                       int int_t1_r = (int) t1_r;                          // Cast literal
-                      System.out.println("DEBUG: PredEval.Eval (Case 2 - H-like direct): Comparing (int)" + t1_r + " vs " + t2_i);
                       if (int_t1_r == t2_i) comp_res = 0;
                       else if (int_t1_r < t2_i) comp_res = -1;
                       else comp_res = 1;
-                      System.out.println("DEBUG: PredEval.Eval (Case 2 - H-like direct) - Comparison result: " + comp_res);
-                      // Evaluate the result directly for this case
                       if (!evaluateOperator(comp_res, temp_ptr.op)) return false;
                   } catch (Exception e) {
                       throw new PredEvalException (e, "Error during explicit Real literal vs Int attribute comparison.");
@@ -224,22 +207,14 @@ public class PredEval
                   int[] vec1 = literal_tuple.getVectorFld(literal_fld_no);
                   int[] vec2 = attr_tuple.getVectorFld(attr_fld_no);
                   double dist = TupleUtils.calculateEuclideanDistance(vec1, vec2);
-                  System.out.println("DEBUG: PredEval.Eval (Case 2 - Vector) - Calculated distance: " + dist + ", Threshold: " + temp_ptr.distance);
                   if (!evaluateVectorOperator(dist, temp_ptr.op, temp_ptr.distance)) return false;
-                  // Vector comparison handled, skip standard evaluation below
               }
-              // Standard comparison for all other non-vector types
               else {
-                  // Use the simplified CompareTupleWithTuple via CompareTupleWithValue
-                  // Note: CompareTupleWithTuple expects the type of the *first* tuple's field
-                  System.out.println("DEBUG: PredEval.Eval (Case 2 - Standard) - Calling simplified CompareTupleWithValue.");
                   // We need CompareTupleWithTuple directly here as CompareTupleWithValue assumes attr vs literal structure
                   comp_res = TupleUtils.CompareTupleWithTuple(literal_type, literal_tuple, literal_fld_no, attr_tuple, attr_fld_no);
-                  System.out.println("DEBUG: PredEval.Eval (Case 2 - Standard) - CompareTupleWithTuple result: " + comp_res);
-                  // Evaluate the result for standard cases
                   if (!evaluateOperator(comp_res, temp_ptr.op)) return false;
               }
-              // *** MODIFICATION END ***
+              
           }
           // Case 3: attr CMP attr (Joins)
           else if (temp_ptr.type1.attrType == AttrType.attrSymbol && temp_ptr.type2.attrType == AttrType.attrSymbol) {
@@ -274,22 +249,18 @@ public class PredEval
               }
 
               // Perform comparison
-              int comp_res; // Declare comp_res
-              System.out.println("DEBUG: PredEval.Eval (Case 3) - Comparing attr (type " + type1.attrType + ") vs attr (type " + type2.attrType + ")");
+              int comp_res; 
 
-              // *** MODIFICATION START ***
+             
               // Check for Real vs. Integer attribute join cases
               if (type1.attrType == AttrType.attrReal && type2.attrType == AttrType.attrInteger) {
                   try {
                       float t1_r = tuple1_ref.getFloFld(fld1_no); // Get Real attr1
                       int t2_i = tuple2_ref.getIntFld(fld2_no);   // Get Int attr2
                       int int_t1_r = (int) t1_r;                  // Cast attr1
-                      System.out.println("DEBUG: PredEval.Eval (Case 3 - H-like direct Real/Int): Comparing (int)" + t1_r + " vs " + t2_i);
                       if (int_t1_r == t2_i) comp_res = 0;
                       else if (int_t1_r < t2_i) comp_res = -1;
                       else comp_res = 1;
-                      System.out.println("DEBUG: PredEval.Eval (Case 3 - H-like direct Real/Int) - Comparison result: " + comp_res);
-                      // Evaluate the result directly for this case
                       if (!evaluateOperator(comp_res, temp_ptr.op)) return false;
                   } catch (Exception e) {
                       throw new PredEvalException (e, "Error during explicit Real vs Int attribute join comparison.");
@@ -299,12 +270,9 @@ public class PredEval
                       int t1_i = tuple1_ref.getIntFld(fld1_no);     // Get Int attr1
                       float t2_r = tuple2_ref.getFloFld(fld2_no);   // Get Real attr2
                       int int_t2_r = (int) t2_r;                    // Cast attr2
-                      System.out.println("DEBUG: PredEval.Eval (Case 3 - H-like direct Int/Real): Comparing " + t1_i + " vs (int)" + t2_r);
                       if (t1_i == int_t2_r) comp_res = 0;
                       else if (t1_i < int_t2_r) comp_res = -1;
                       else comp_res = 1;
-                      System.out.println("DEBUG: PredEval.Eval (Case 3 - H-like direct Int/Real) - Comparison result: " + comp_res);
-                      // Evaluate the result directly for this case
                       if (!evaluateOperator(comp_res, temp_ptr.op)) return false;
                   } catch (Exception e) {
                       throw new PredEvalException (e, "Error during explicit Int vs Real attribute join comparison.");
@@ -316,26 +284,15 @@ public class PredEval
                   int[] vec1 = tuple1_ref.getVectorFld(fld1_no);
                   int[] vec2 = tuple2_ref.getVectorFld(fld2_no);
                   double dist = TupleUtils.calculateEuclideanDistance(vec1, vec2);
-                  System.out.println("DEBUG: PredEval.Eval (Case 3 - Vector) - Calculated distance: " + dist + ", Threshold: " + temp_ptr.distance);
-                  // Vector join condition usually involves distance threshold
                   if (!evaluateVectorOperator(dist, temp_ptr.op, temp_ptr.distance)) return false;
-                  // Vector comparison handled, skip standard evaluation below
               }
-              // Standard comparison for all other non-vector, same-type joins
               else {
-                  // Check for type mismatch (only if strict matching is desired)
                   if (type1.attrType != type2.attrType) {
                      System.err.println("Warning: Comparing attributes of incompatible types in join: " + type1.attrType + " vs " + type2.attrType + ". Relying on CompareTupleWithTuple handling.");
-                     // throw new PredEvalException("Attribute types do not match for comparison: " + type1 + " vs " + type2);
                   }
-                  // Use the simplified CompareTupleWithTuple
-                  System.out.println("DEBUG: PredEval.Eval (Case 3 - Standard) - Calling simplified CompareTupleWithTuple.");
                   comp_res = TupleUtils.CompareTupleWithTuple(type1, tuple1_ref, fld1_no, tuple2_ref, fld2_no);
-                  System.out.println("DEBUG: PredEval.Eval (Case 3 - Standard) - CompareTupleWithTuple result: " + comp_res);
-                  // Evaluate the result for standard cases
                   if (!evaluateOperator(comp_res, temp_ptr.op)) return false;
               }
-              // *** MODIFICATION END ***
           }
           // Case 4: literal CMP literal
           else {
@@ -345,11 +302,10 @@ public class PredEval
       } catch (FieldNumberOutOfBoundException e) {
           throw new PredEvalException(e, "Field number out of bounds: " + e.getMessage());
       } catch (IOException e) { // Catch IO exceptions from tuple access
-          throw e; // Re-throw IO exceptions
-      } catch (Exception e) { // Catch other potential errors during evaluation
-          // Wrap other exceptions in PredEvalException for clarity
+          throw e; //  IO exceptions
+      } catch (Exception e) { // Catch other potential errors during evaluation         
           System.err.println("ERROR in PredEval.Eval: " + e.getMessage()); // Log the error
-          e.printStackTrace(); // Print stack trace for debugging
+          e.printStackTrace(); 
           throw new PredEvalException(e, "Error evaluating predicate: " + e.getMessage());
       }
 
@@ -380,7 +336,6 @@ public class PredEval
                 System.err.println("Warning: Unsupported or unknown operator (" + op.attrOperator + ") for non-vector comparison.");
                 result = false; // Unknown or unsupported operator
         }
-        System.out.println("DEBUG: evaluateOperator - comp_res=" + comp_res + ", op=" + op.attrOperator + ", result=" + result); // ADDED DEBUG
         return result;
     }
 
@@ -407,7 +362,6 @@ public class PredEval
                  System.err.println("Warning: Unsupported or unknown operator (" + op.attrOperator + ") for vector distance comparison.");
                  result = false; // Operator not applicable to vector distance
         }
-        System.out.println("DEBUG: evaluateVectorOperator - distance=" + distance + ", op=" + op.attrOperator + ", threshold=" + threshold + ", result=" + result); // ADDED DEBUG
         return result;
     }
 
